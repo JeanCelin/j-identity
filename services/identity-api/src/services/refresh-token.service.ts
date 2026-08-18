@@ -2,7 +2,7 @@
 import * as crypto from "crypto";
 
 export function generateRefreshToken() {
-  const refreshToken = crypto.randomBytes(32).toString("hex");
+  const refreshToken = generateSecureRandomToken()
   const refreshTokenHash = hashRefreshToken(refreshToken)
   
   return { refreshToken, refreshTokenHash };
@@ -13,3 +13,7 @@ export function hashRefreshToken(refreshToken: string) {
   return refreshTokenHash
 }
 
+export function  generateSecureRandomToken(){
+    const token = crypto.randomBytes(32).toString("hex");
+    return token
+}

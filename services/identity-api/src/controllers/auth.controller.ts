@@ -1,21 +1,16 @@
 import { Request, Response } from "express";
 
-import {
-  registerSchema,
-  loginSchema,
-} from "../schemas/auth.schema";
+import { registerSchema, loginSchema } from "../schemas/auth.schema";
 
 import {
   getUser,
   refreshAccessToken,
   registerUser,
   loginUser,
+  logOut,
 } from "../services/auth.service";
 
-export async function register(
-  req: Request,
-  res: Response,
-) {
+export async function register(req: Request, res: Response) {
   try {
     const data = registerSchema.parse(req.body);
 
@@ -25,24 +20,21 @@ export async function register(
       user,
     });
   } catch (error) {
+    console.log(error);
     return res.status(400).json({
       error: "Unable to register user",
     });
   }
 }
 
-export async function login(
-  req: Request,
-  res: Response,
-) {
+export async function login(req: Request, res: Response) {
   try {
     const data = loginSchema.parse(req.body);
 
-    const { accessToken, refreshToken } =
-      await loginUser(
-        data.email,
-        data.password,
-      );
+    const { accessToken, refreshToken } = await loginUser(
+      data.email,
+      data.password,
+    );
 
     return res.status(200).json({
       accessToken,
@@ -55,12 +47,14 @@ export async function login(
   }
 }
 
-export async function me(
-  req: Request,
-  res: Response,
-) {
+export async function me(req: Request, res: Response) {
   try {
     const id = req.user.id;
+
+    if (!id)
+      return res.status(401).json({
+        error: "Não autorizado",
+      });
 
     const data = await getUser(id);
 
@@ -74,17 +68,12 @@ export async function me(
   }
 }
 
-export async function refresh(
-  req: Request,
-  res: Response,
-) {
+export async function refresh(req: Request, res: Response) {
   try {
     const { refreshToken } = req.body;
 
-    const {
-      accessToken,
-      refreshToken: newRefreshToken,
-    } = await refreshAccessToken(refreshToken);
+    const { accessToken, refreshToken: newRefreshToken } =
+      await refreshAccessToken(refreshToken);
 
     return res.status(200).json({
       accessToken,
@@ -93,6 +82,17 @@ export async function refresh(
   } catch (error) {
     return res.status(401).json({
       error: "Invalid refresh token",
+    });
+  }
+}
+
+export async function logout(req: Request, res: Response) {
+  try {
+    await logOut(req.body.refreshToken);
+    res.status(200).json({ message: "Deslogado com sucesso." });
+  } catch {
+    return res.status(500).json({
+      error: "Erro ao realizar logout",
     });
   }
 }

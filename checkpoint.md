@@ -1310,3 +1310,5 @@ Identity
 ```
 
 O sistema deverá ser suficientemente independente para ser utilizado por aplicações futuras sem que elas precisem conhecer ou reproduzir sua implementação interna.
+
+

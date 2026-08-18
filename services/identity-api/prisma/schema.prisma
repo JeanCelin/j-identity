@@ -23,7 +23,8 @@ model Session {
   id           String   @id @default(uuid())
   userId       String
   user         User     @relation(fields: [userId], references: [id])
-  refreshTokenHash String @unique
+  familyId     String   @default(uuid())
+  refreshTokenHash String @unique 
   expiresAt    DateTime
   revokedAt    DateTime?
   createdAt    DateTime @default(now())
