@@ -4,7 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
 
-    "rootDir": "services/identity-api/src",
+    "rootDir": "./src",
     "outDir": "./dist",
 
     "strict": true,
@@ -16,5 +16,5 @@
     "skipLibCheck": true
   },
 
-  "include": ["services/identity-api/src"]
+  "include": ["src"]
 }

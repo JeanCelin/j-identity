@@ -1,5 +1,5 @@
-import { prisma } from "../lib/prisma";
-import { DbClient } from "../types/db-client";
+import { prisma } from "../lib/prisma.js";
+import { DbClient } from "../types/db-client.js";
 
 export function createSession(
   userId: string,

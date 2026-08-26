@@ -2,25 +2,25 @@ import {
   createUser,
   findUserByEmail,
   findUserById,
-} from "../repositories/user.repository";
+} from "../repositories/user.repository.js";
 
 import bcrypt from "bcrypt";
 
-import { generateAccessToken } from "./token.service";
+import { generateAccessToken } from "./token.service.js";
 
 import {
   generateRefreshToken,
   generateSecureRandomToken,
   hashRefreshToken,
-} from "./refresh-token.service";
+} from "./refresh-token.service.js";
 
 import {
   createSession,
   findSessionByRefreshTokenHash,
   revokeSession,
   revokeSessionFamily,
-} from "../repositories/session.repositoty";
-import { prisma } from "../lib/prisma";
+} from "../repositories/session.repository.js";
+import { prisma } from "../lib/prisma.js";
 
 type RegisterData = {
   name: string;
