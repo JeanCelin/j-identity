@@ -225,3 +225,47 @@ separação de responsabilidades;
 integração entre aplicação, ORM e banco de dados.
 
 A implementação será evoluída gradualmente, mantendo o foco em compreender o motivo de cada decisão arquitetural antes de adicionar novas funcionalidades. -->
+
+## Contrato de erros
+
+### Contrato padrão
+
+{
+error: "ERROR_CODE",
+message: "Mensagem"
+}
+
+### Código de erros
+
+Autenticação:
+
+| Código                 | Status | Quando acontece                  |
+| ---------------------- | -----: | -------------------------------- |
+| `INVALID_CREDENTIALS`  |    401 | Email ou senha inválidos         |
+| `UNAUTHORIZED`         |    401 | Access Token ausente ou inválido |
+| `TOKEN_EXPIRED`        |    401 | Access Token expirado            |
+| `INVALID_TOKEN`        |    401 | Token malformado ou inválido     |
+| `SESSION_NOT_FOUND`    |    401 | Sessão não encontrada            |
+| `SESSION_EXPIRED`      |    401 | Sessão expirada                  |
+| `SESSION_REVOKED`      |    401 | Sessão revogada                  |
+| `REFRESH_TOKEN_REUSED` |    401 | Refresh Token reutilizado        |
+
+Usuários:
+
+| Código                 | Status | Quando acontece        |
+| ---------------------- | -----: | ---------------------- |
+| `USER_NOT_FOUND`       |    404 | Usuário não encontrado |
+| `USER_INACTIVE`        |    403 | Usuário desativado     |
+| `EMAIL_ALREADY_EXISTS` |    409 | Email já registrado    |
+
+Validação:
+
+| Código             | Status | Quando acontece              |
+| ------------------ | -----: | ---------------------------- |
+| `VALIDATION_ERROR` |    400 | Dados enviados são inválidos |
+
+Servidor: 
+
+| Código                  | Status | Quando acontece |
+| ----------------------- | -----: | --------------- |
+| `INTERNAL_SERVER_ERROR` |    500 | Erro inesperado |

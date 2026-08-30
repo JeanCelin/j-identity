@@ -7,6 +7,7 @@ import { corsMiddleware } from "./middleware/cors.middleware.js";
 import cookieParser from "cookie-parser";
 
 import authRoutes from "./routes/auth.routes.js";
+import { errorHandler } from "./middleware/error-handler.js";
 
 const app = express();
 
@@ -26,6 +27,8 @@ app.get("/health", (request, response) => {
     status: "ok",
   });
 });
+
+app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

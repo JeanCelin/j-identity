@@ -20,7 +20,9 @@ import {
   revokeSession,
   revokeSessionFamily,
 } from "../repositories/session.repository.js";
+
 import { prisma } from "../lib/prisma.js";
+import { AppError } from "../errors/app-error.js";
 
 type RegisterData = {
   name: string;
@@ -32,7 +34,11 @@ export async function registerUser(data: RegisterData) {
   const existingUser = await findUserByEmail(data.email);
 
   if (existingUser) {
-    throw new Error("User already exists");
+    throw new AppError(
+      "EMAIL_ALREADY_EXISTS",
+      "Este email já está cadastrado",
+      409,
+    );
   }
 
   const passwordHash = await bcrypt.hash(data.password, 12);
@@ -51,27 +57,56 @@ export async function registerUser(data: RegisterData) {
 export async function loginUser(email: string, password: string) {
   const user = await findUserByEmail(email);
 
+  /*
+   * Não diferenciamos:
+   * - usuário inexistente
+   * - senha incorreta
+   * - usuário inativo
+   *
+   * Isso evita revelar informações sobre a existência
+   * ou estado da conta.
+   */
   if (!user) {
-    throw new Error("INVALID_CREDENTIALS");
+    throw new AppError(
+      "INVALID_CREDENTIALS",
+      "Email ou senha inválidos",
+      401,
+    );
   }
 
-  const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+  const passwordMatches = await bcrypt.compare(
+    password,
+    user.passwordHash,
+  );
 
   if (!passwordMatches) {
-    throw new Error("INVALID_CREDENTIALS");
+    throw new AppError(
+      "INVALID_CREDENTIALS",
+      "Email ou senha inválidos",
+      401,
+    );
   }
 
   if (!user.isActive) {
-    throw new Error("INVALID_CREDENTIALS");
+    throw new AppError(
+      "INVALID_CREDENTIALS",
+      "Email ou senha inválidos",
+      401,
+    );
   }
 
   const accessToken = generateAccessToken(user.id);
 
-  const { refreshToken, refreshTokenHash } = generateRefreshToken();
+  const {
+    refreshToken,
+    refreshTokenHash,
+  } = generateRefreshToken();
 
   const refreshTokenExpiresAt = new Date();
 
-  refreshTokenExpiresAt.setDate(refreshTokenExpiresAt.getDate() + 30);
+  refreshTokenExpiresAt.setDate(
+    refreshTokenExpiresAt.getDate() + 30,
+  );
 
   const familyId = generateSecureRandomToken();
 
@@ -92,7 +127,18 @@ export async function getUser(id: string) {
   const user = await findUserById(id);
 
   if (!user) {
-    throw new Error("Falha ao obter usuário");
+    /*
+     * Para o endpoint /me, não precisamos esconder que
+     * o usuário associado ao token não existe.
+     *
+     * Porém, se quisermos uma política mais restritiva,
+     * isso pode futuramente ser convertido para UNAUTHORIZED.
+     */
+    throw new AppError(
+      "UNAUTHORIZED",
+      "Não autorizado",
+      401,
+    );
   }
 
   return user;
@@ -101,37 +147,74 @@ export async function getUser(id: string) {
 export async function refreshAccessToken(refreshToken: string) {
   try {
     const refreshTokenHash = hashRefreshToken(refreshToken);
-    const session = await findSessionByRefreshTokenHash(refreshTokenHash);
+
+    const session =
+      await findSessionByRefreshTokenHash(refreshTokenHash);
+
     if (!session) {
-      throw new Error();
+      throw new AppError(
+        "INVALID_TOKEN",
+        "Token inválido",
+        401,
+      );
     }
 
+    /*
+     * A sessão já foi revogada.
+     *
+     * Isso pode significar reutilização de um Refresh Token
+     * antigo. Revogamos toda a família, mas não informamos
+     * ao cliente o motivo exato.
+     */
     if (session.revokedAt) {
       await revokeSessionFamily(session.familyId);
 
-      throw new Error();
+      throw new AppError(
+        "UNAUTHORIZED",
+        "Falha de autenticação",
+        401,
+      );
     }
 
     if (session.expiresAt <= new Date()) {
-      throw new Error();
+      throw new AppError(
+        "SESSION_EXPIRED",
+        "Sessão expirada",
+        401,
+      );
     }
 
     const user = await findUserById(session.userId);
 
     if (!user) {
-      throw new Error();
+      /*
+       * Não precisamos expor USER_NOT_FOUND aqui.
+       *
+       * Uma sessão válida apontando para um usuário inexistente
+       * representa um estado inconsistente da aplicação.
+       */
+      throw new AppError(
+        "INTERNAL_SERVER_ERROR",
+        "Erro interno do servidor",
+        500,
+      );
     }
 
     if (!user.isActive) {
-      throw new Error();
+      throw new AppError(
+        "UNAUTHORIZED",
+        "Falha de autenticação",
+        401,
+      );
     }
+
     const result = await prisma.$transaction(async (tx) => {
-      // A Session antiga deixa de ser válida.
+      // Revoga a sessão atual.
       await revokeSession(session.id, tx);
-      // throw new Error("TESTE DE ROLLBACK");
+
       const accessToken = generateAccessToken(user.id);
 
-      // Geramos UM novo Refresh Token.
+      // Gera um novo Refresh Token.
       const {
         refreshToken: newRefreshToken,
         refreshTokenHash: newRefreshTokenHash,
@@ -139,9 +222,11 @@ export async function refreshAccessToken(refreshToken: string) {
 
       const newRefreshTokenExpiresAt = new Date();
 
-      newRefreshTokenExpiresAt.setDate(newRefreshTokenExpiresAt.getDate() + 30);
+      newRefreshTokenExpiresAt.setDate(
+        newRefreshTokenExpiresAt.getDate() + 30,
+      );
 
-      // Criamos a nova Session associada ao novo Refresh Token.
+      // Cria a nova sessão na mesma família.
       await createSession(
         user.id,
         newRefreshTokenHash,
@@ -155,22 +240,55 @@ export async function refreshAccessToken(refreshToken: string) {
         refreshToken: newRefreshToken,
       };
     });
+
     return result;
   } catch (err) {
-    throw new Error("Falha de autenticação");
+    /*
+     * AppError já representa um erro conhecido
+     * e deve chegar ao errorHandler intacto.
+     */
+    if (err instanceof AppError) {
+      throw err;
+    }
+
+    /*
+     * Qualquer erro inesperado é convertido para um erro
+     * genérico antes de chegar ao cliente.
+     */
+    throw new AppError(
+      "INTERNAL_SERVER_ERROR",
+      "Erro interno do servidor",
+      500,
+    );
   }
 }
 
 export async function logOut(refreshToken: string) {
   const refreshTokenHash = hashRefreshToken(refreshToken);
 
-  const session = await findSessionByRefreshTokenHash(refreshTokenHash);
+  const session =
+    await findSessionByRefreshTokenHash(refreshTokenHash);
+
+  /*
+   * Logout deve ser idempotente.
+   *
+   * Se a sessão não existe, consideramos que o usuário
+   * já está deslogado.
+   */
   if (!session) {
     return "success";
   }
 
-  if (session?.revokedAt != null) {
+  /*
+   * Se o token já foi revogado, não precisamos produzir
+   * um erro para o cliente.
+   *
+   * Como existe possibilidade de reutilização desse token,
+   * revogamos a família inteira.
+   */
+  if (session.revokedAt) {
     await revokeSessionFamily(session.familyId);
+
     return "success";
   }
 

@@ -1,0 +1,19 @@
+export type ErrorCode =
+  | "INVALID_CREDENTIALS"
+  | "UNAUTHORIZED"
+  | "TOKEN_EXPIRED"
+  | "INVALID_TOKEN"
+  | "SESSION_NOT_FOUND"
+  | "SESSION_EXPIRED"
+  | "SESSION_REVOKED"
+  | "REFRESH_TOKEN_REUSED"
+  | "USER_NOT_FOUND"
+  | "USER_INACTIVE"
+  | "EMAIL_ALREADY_EXISTS"
+  | "VALIDATION_ERROR"
+  | "INTERNAL_SERVER_ERROR";
+
+export interface ApiErrorResponse {
+  error: ErrorCode;
+  message: string;
+}

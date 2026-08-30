@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 
 import { registerSchema, loginSchema } from "../schemas/auth.schema.js";
 import {
@@ -12,8 +12,9 @@ import {
   loginUser,
   logOut,
 } from "../services/auth.service.js";
+import { AppError } from "../errors/app-error.js";
 
-export async function register(req: Request, res: Response) {
+export async function register(req: Request, res: Response, next: NextFunction) {
   try {
     const data = registerSchema.parse(req.body);
 
@@ -23,14 +24,11 @@ export async function register(req: Request, res: Response) {
       user,
     });
   } catch (error) {
-    console.log(error);
-    return res.status(400).json({
-      error: "Unable to register user",
-    });
+    return next(error);
   }
 }
 
-export async function login(req: Request, res: Response) {
+export async function login(req: Request, res: Response, next: NextFunction) {
   try {
     const data = loginSchema.parse(req.body);
 
@@ -45,20 +43,16 @@ export async function login(req: Request, res: Response) {
       accessToken,
     });
   } catch (error) {
-    return res.status(401).json({
-      error: "Invalid credentials",
-    });
+    return next(error);
   }
 }
 
-export async function me(req: Request, res: Response) {
+export async function me(req: Request, res: Response, next: NextFunction) {
   try {
     const id = req.user.id;
-
-    if (!id)
-      return res.status(401).json({
-        error: "Não autorizado",
-      });
+      if(!id){
+        throw new AppError("UNAUTHORIZED", "Não autorizado", 401)
+      }
 
     const data = await getUser(id);
 
@@ -66,20 +60,18 @@ export async function me(req: Request, res: Response) {
       data,
     });
   } catch (error) {
-    return res.status(401).json({
-      error: "Não autorizado",
-    });
+    return next(error);
   }
 }
 
-export async function refresh(req: Request, res: Response) {
+export async function refresh(req: Request, res: Response, next: NextFunction) {
   try {
     const refreshToken = req.cookies[REFRESH_TOKEN_COOKIE];
 
-    if (!refreshToken) {
-      return res.status(401).json({
-        error: "Invalid refresh token",
-      });
+  
+
+    if(!refreshToken) {
+      throw new AppError("INVALID_TOKEN", "Token inválido", 401)
     }
 
     const { accessToken, refreshToken: newRefreshToken } =
@@ -95,13 +87,11 @@ export async function refresh(req: Request, res: Response) {
       accessToken,
     });
   } catch (error) {
-    return res.status(401).json({
-      error: "Invalid refresh token",
-    });
+    return next(error);
   }
 }
 
-export async function logout(req: Request, res: Response) {
+export async function logout(req: Request, res: Response, next: NextFunction) {
   try {
     const refreshToken = req.cookies[REFRESH_TOKEN_COOKIE];
 
@@ -119,9 +109,7 @@ export async function logout(req: Request, res: Response) {
     return res.status(200).json({
       message: "Deslogado com sucesso.",
     });
-  } catch {
-    return res.status(500).json({
-      error: "Erro ao realizar logout",
-    });
+  } catch (error) {
+    return next(error);
   }
 }
