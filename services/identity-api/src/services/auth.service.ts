@@ -23,6 +23,7 @@ import {
 
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../errors/app-error.js";
+import { Prisma } from "@prisma/client";
 
 type RegisterData = {
   name: string;
@@ -43,15 +44,31 @@ export async function registerUser(data: RegisterData) {
 
   const passwordHash = await bcrypt.hash(data.password, 12);
 
-  const user = await createUser({
-    name: data.name,
-    email: data.email,
-    passwordHash,
-  });
 
-  const { passwordHash: _, ...safeUser } = user;
+    try {
+    const user = await createUser({
+      name: data.name,
+      email: data.email,
+      passwordHash,
+    });
 
-  return safeUser;
+    const { passwordHash: _, ...safeUser } = user;
+
+    return safeUser;
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      throw new AppError(
+        "EMAIL_ALREADY_EXISTS",
+        "Este email já está cadastrado",
+        409,
+      );
+    }
+
+    throw err;
+  }
 }
 
 export async function loginUser(email: string, password: string) {
@@ -67,46 +84,26 @@ export async function loginUser(email: string, password: string) {
    * ou estado da conta.
    */
   if (!user) {
-    throw new AppError(
-      "INVALID_CREDENTIALS",
-      "Email ou senha inválidos",
-      401,
-    );
+    throw new AppError("INVALID_CREDENTIALS", "Email ou senha inválidos", 401);
   }
 
-  const passwordMatches = await bcrypt.compare(
-    password,
-    user.passwordHash,
-  );
+  const passwordMatches = await bcrypt.compare(password, user.passwordHash);
 
   if (!passwordMatches) {
-    throw new AppError(
-      "INVALID_CREDENTIALS",
-      "Email ou senha inválidos",
-      401,
-    );
+    throw new AppError("INVALID_CREDENTIALS", "Email ou senha inválidos", 401);
   }
 
   if (!user.isActive) {
-    throw new AppError(
-      "INVALID_CREDENTIALS",
-      "Email ou senha inválidos",
-      401,
-    );
+    throw new AppError("INVALID_CREDENTIALS", "Email ou senha inválidos", 401);
   }
 
   const accessToken = generateAccessToken(user.id);
 
-  const {
-    refreshToken,
-    refreshTokenHash,
-  } = generateRefreshToken();
+  const { refreshToken, refreshTokenHash } = generateRefreshToken();
 
   const refreshTokenExpiresAt = new Date();
 
-  refreshTokenExpiresAt.setDate(
-    refreshTokenExpiresAt.getDate() + 30,
-  );
+  refreshTokenExpiresAt.setDate(refreshTokenExpiresAt.getDate() + 30);
 
   const familyId = generateSecureRandomToken();
 
@@ -126,14 +123,7 @@ export async function loginUser(email: string, password: string) {
 export async function getUser(id: string) {
   const user = await findUserById(id);
 
-  if (!user) {
-    /*
-     * Para o endpoint /me, não precisamos esconder que
-     * o usuário associado ao token não existe.
-     *
-     * Porém, se quisermos uma política mais restritiva,
-     * isso pode futuramente ser convertido para UNAUTHORIZED.
-     */
+  if (!user || !user.isActive) {
     throw new AppError(
       "UNAUTHORIZED",
       "Não autorizado",
@@ -148,15 +138,10 @@ export async function refreshAccessToken(refreshToken: string) {
   try {
     const refreshTokenHash = hashRefreshToken(refreshToken);
 
-    const session =
-      await findSessionByRefreshTokenHash(refreshTokenHash);
+    const session = await findSessionByRefreshTokenHash(refreshTokenHash);
 
     if (!session) {
-      throw new AppError(
-        "INVALID_TOKEN",
-        "Token inválido",
-        401,
-      );
+      throw new AppError("INVALID_TOKEN", "Token inválido", 401);
     }
 
     /*
@@ -169,19 +154,11 @@ export async function refreshAccessToken(refreshToken: string) {
     if (session.revokedAt) {
       await revokeSessionFamily(session.familyId);
 
-      throw new AppError(
-        "UNAUTHORIZED",
-        "Falha de autenticação",
-        401,
-      );
+      throw new AppError("UNAUTHORIZED", "Falha de autenticação", 401);
     }
 
     if (session.expiresAt <= new Date()) {
-      throw new AppError(
-        "SESSION_EXPIRED",
-        "Sessão expirada",
-        401,
-      );
+      throw new AppError("SESSION_EXPIRED", "Sessão expirada", 401);
     }
 
     const user = await findUserById(session.userId);
@@ -201,11 +178,7 @@ export async function refreshAccessToken(refreshToken: string) {
     }
 
     if (!user.isActive) {
-      throw new AppError(
-        "UNAUTHORIZED",
-        "Falha de autenticação",
-        401,
-      );
+      throw new AppError("UNAUTHORIZED", "Falha de autenticação", 401);
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -222,9 +195,7 @@ export async function refreshAccessToken(refreshToken: string) {
 
       const newRefreshTokenExpiresAt = new Date();
 
-      newRefreshTokenExpiresAt.setDate(
-        newRefreshTokenExpiresAt.getDate() + 30,
-      );
+      newRefreshTokenExpiresAt.setDate(newRefreshTokenExpiresAt.getDate() + 30);
 
       // Cria a nova sessão na mesma família.
       await createSession(
@@ -266,8 +237,7 @@ export async function refreshAccessToken(refreshToken: string) {
 export async function logOut(refreshToken: string) {
   const refreshTokenHash = hashRefreshToken(refreshToken);
 
-  const session =
-    await findSessionByRefreshTokenHash(refreshTokenHash);
+  const session = await findSessionByRefreshTokenHash(refreshTokenHash);
 
   /*
    * Logout deve ser idempotente.

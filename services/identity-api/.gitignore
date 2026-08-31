@@ -55,3 +55,5 @@ temp/
 .local/
 
 metodologia-de-estudo.md
+
+*.bat

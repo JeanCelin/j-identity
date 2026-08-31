@@ -14,7 +14,11 @@ import {
 } from "../services/auth.service.js";
 import { AppError } from "../errors/app-error.js";
 
-export async function register(req: Request, res: Response, next: NextFunction) {
+export async function register(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   try {
     const data = registerSchema.parse(req.body);
 
@@ -49,12 +53,7 @@ export async function login(req: Request, res: Response, next: NextFunction) {
 
 export async function me(req: Request, res: Response, next: NextFunction) {
   try {
-    const id = req.user.id;
-      if(!id){
-        throw new AppError("UNAUTHORIZED", "Não autorizado", 401)
-      }
-
-    const data = await getUser(id);
+    const data = await getUser(req.user.id);
 
     return res.status(200).json({
       data,
@@ -68,10 +67,8 @@ export async function refresh(req: Request, res: Response, next: NextFunction) {
   try {
     const refreshToken = req.cookies[REFRESH_TOKEN_COOKIE];
 
-  
-
-    if(!refreshToken) {
-      throw new AppError("INVALID_TOKEN", "Token inválido", 401)
+    if (!refreshToken) {
+      throw new AppError("INVALID_TOKEN", "Token inválido", 401);
     }
 
     const { accessToken, refreshToken: newRefreshToken } =

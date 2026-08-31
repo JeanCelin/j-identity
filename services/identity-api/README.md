@@ -1,271 +1,347 @@
-<!-- # j-identity
+# J-Identity API
 
-O **J-Identity** será um serviço de identidade e autenticação centralizado, hospedado online, que poderá ser reutilizado por projetos independentes.
+API centralizada de identidade e autenticação para aplicações clientes. A responsabilidade principal da API é gerenciar cadastro de usuários, autenticação, sessões, tokens e proteção de rotas.
 
-Cada aplicação poderá consumir o serviço através da API, sem precisar implementar seu próprio sistema de autenticação.
+A API pode ser consumida diretamente via HTTP ou através do projeto complementar `j-identity-sdk`.
 
-O objetivo do projeto é, além de criar uma solução reutilizável, compreender na prática como funciona a arquitetura de um serviço de identidade.
+## Visão geral
 
-## Responsabilidades
+A aplicação expõe suas rotas de autenticação sob o prefixo `/auth` e fornece um endpoint de saúde em `/health`.
 
-O J-Identity será responsável por:
+Fluxo principal:
 
-- cadastro de usuários;
-- login;
-- validação de credenciais;
-- armazenamento seguro de senhas através de hash;
-- autenticação através de JWT;
-- access tokens;
-- refresh tokens;
-- refresh token rotation;
-- detecção de reutilização de refresh tokens;
-- gerenciamento de sessões;
-- agrupamento de sessões através de token families;
-- revogação de sessões;
-- revogação de uma família de sessões;
-- logout;
-- confirmação de e-mail;
-- recuperação de senha;
-- posteriormente, autorização;
-- posteriormente, roles e permissions.
-
-Informações específicas de cada aplicação, como avatar, preferências e outros dados de perfil, não serão responsabilidade do J-Identity.
-
-## Segurança e acesso
-
-O J-Identity será um serviço de uso pessoal.
-
-O acesso deverá ser controlado para impedir que terceiros utilizem a infraestrutura livremente.
-
-Serão estudadas e implementadas estratégias como:
-
-- API Keys;
-- credenciais de aplicações;
-- registro de aplicações autorizadas;
-- whitelist quando aplicável;
-- CORS como mecanismo de controle de origem, mas não como mecanismo principal de segurança;
-- rate limiting;
-- posteriormente, outras medidas de segurança conforme a arquitetura evoluir.
-
-## Tecnologias
-
-- Node.js
-- TypeScript
-- Express
-- Prisma
-- PostgreSQL
-- Supabase
-- JWT
-- bcrypt
-- Zod
+1. Usuário se registra em `/auth/register`
+2. Faz login em `/auth/login`
+3. Recebe um Access Token na resposta
+4. O Refresh Token é armazenado em cookie HttpOnly
+5. Usa o Access Token no header `Authorization: Bearer <token>`
+6. Renova a autenticação via `/auth/refresh`
+7. Finaliza a sessão em `/auth/logout`
 
 ## Arquitetura
 
-O fluxo geral da aplicação será:
+A API segue uma arquitetura em camadas:
 
-Cliente
-   ↓
-Express
-   ↓
-Middleware
-   ↓
-Routes
-   ↓
-Controller
-   ↓
-Service
-   ↓
-Repository
-   ↓
-Prisma
-   ↓
-PostgreSQL
+* `routes/` — definição dos endpoints HTTP
+* `controllers/` — comunicação entre HTTP e regras de negócio
+* `services/` — regras de negócio e fluxos de autenticação
+* `repositories/` — acesso ao banco de dados
+* `middleware/` — autenticação e tratamento de requisições
+* `schemas/` — validação de dados com Zod
+* `errors/` — contrato e tratamento centralizado de erros
+* `config/` — configurações como cookies e CORS
+* `prisma/` — schema e migrations do banco de dados
 
+A separação tem como objetivo evitar que regras de negócio fiquem acopladas diretamente ao Express ou ao banco de dados.
 
-## Responsabilidades
-Middleware
+## Stack
 
-Executa lógica durante o pipeline da requisição, como autenticação, autorização, logging e validações específicas.
+* Node.js
+* TypeScript
+* Express
+* Prisma
+* PostgreSQL
+* JWT
+* bcrypt
+* Zod
+* CORS
 
-Routes
+## Modelo de dados
 
-Define os endpoints disponíveis e direciona cada requisição para o controller correspondente.
+### User
 
-Controllers
+Representa uma identidade da aplicação.
 
-Responsáveis por lidar com HTTP: receber Request, chamar a camada apropriada e construir a Response.
+* `id` — identificador do usuário
+* `name` — nome
+* `email` — único
+* `passwordHash` — senha armazenada como hash
+* `emailVerified` — status de verificação do email
+* `isActive` — estado ativo/inativo da conta
+* `createdAt`
+* `updatedAt`
 
-Services
+### Session
 
-Contêm as regras de negócio da aplicação.
+Representa uma sessão associada a um Refresh Token.
 
-Repositories
-
-Responsáveis pelo acesso aos dados e pela comunicação com o Prisma.
-
-Prisma
-
-ORM utilizado para fazer a comunicação entre a aplicação TypeScript e o PostgreSQL.
-
-PostgreSQL
-
-Banco de dados responsável pela persistência dos dados.
-
-## Infraestrutura
-
-O PostgreSQL será hospedado no Supabase.
-
-O J-Identity será uma aplicação independente e hospedada online.
-
-Os projetos consumidores não precisarão estar no mesmo repositório ou diretório.
-
-A integração futura poderá ser feita diretamente pela API ou através de um SDK próprio.
+* `id` — identificador da sessão
+* `userId` — usuário proprietário
+* `familyId` — identificador da família de tokens
+* `refreshTokenHash` — hash do Refresh Token
+* `expiresAt` — data de expiração
+* `revokedAt` — data de revogação
+* `createdAt`
 
 ## Autenticação
 
-O fluxo de autenticação utiliza dois tipos principais de token:
+### Access Token
 
-Access Token
+O Access Token é um JWT utilizado para autenticar requisições protegidas.
 
-O access token é um JWT de curta duração utilizado para autenticar requisições protegidas.
+Características:
 
-Atualmente possui duração de:
+* curta duração
+* expiração atual de 15 minutos
+* enviado através do header:
 
-15 minutos
-
-O token contém o identificador do usuário através da claim sub.
-
-Exemplo conceitual:
-
-{
-  "sub": "user-id"
-}
-
-As requisições protegidas utilizam o header:
-
+```http
 Authorization: Bearer <accessToken>
+```
 
-O middleware de autenticação valida:
+O token contém o identificador do usuário no claim `sub`.
 
-existência do header Authorization;
-esquema Bearer;
-existência do token;
-assinatura do JWT;
-validade do token;
-existência de um sub válido.
+O Access Token é mantido pelo cliente e não é persistido pela API.
 
+### Refresh Token
 
-## Refresh Token
+O Refresh Token é utilizado exclusivamente para renovar a autenticação.
 
-O refresh token é um token aleatório criptograficamente seguro utilizado para obter novos access tokens.
+Características:
 
-Os refresh tokens são gerados utilizando crypto.randomBytes().
+* gerado usando valores aleatórios criptograficamente seguros
+* nunca armazenado em texto puro no banco
+* armazenado apenas como hash SHA-256
+* expiração atual de 30 dias
+* enviado ao cliente através de cookie HttpOnly
 
-O token original não é armazenado no banco de dados.
-
-Em vez disso, é armazenado um hash SHA-256 do refresh token:
-
-Refresh Token
-      ↓
-SHA-256
-      ↓
-Refresh Token Hash
-      ↓
-Banco de dados
-
-Quando o cliente envia um refresh token, o servidor gera novamente o hash e procura a sessão correspondente.
-
-## Sessions
-
-Cada refresh token possui uma Session associada.
-
-A sessão possui, entre outras informações:
-
-id;
-userId;
-familyId;
-refreshTokenHash;
-expiresAt;
-revokedAt;
-createdAt.
+O navegador envia o Refresh Token automaticamente quando a configuração de cookies permite.
 
 ## Refresh Token Rotation
-O J-Identity utiliza Refresh Token Rotation.
 
+Cada utilização válida de um Refresh Token gera uma rotação:
 
-## Endpoints atuais
+```text
+Refresh Token A
+      ↓
+Session A
+      ↓
+revoga Session A
+      ↓
+gera Refresh Token B
+      ↓
+cria Session B
+```
 
+A nova sessão permanece associada à mesma `familyId`.
+
+Dessa forma, um Refresh Token antigo deixa de ser válido após ser utilizado.
+
+## Reuse Detection
+
+Se um Refresh Token que já foi utilizado for reutilizado:
+
+```text
+Refresh Token antigo
+      ↓
+Session já revogada
+      ↓
+possível reutilização detectada
+      ↓
+revoga toda a família
+```
+
+A reutilização é tratada como um evento de segurança.
+
+A informação detalhada sobre reuse detection é mantida internamente. A API não precisa expor ao cliente que uma reutilização específica foi detectada.
+
+## Endpoints
+
+| Método | Rota             | Descrição                     |
+| ------ | ---------------- | ----------------------------- |
+| `POST` | `/auth/register` | Cria um usuário               |
+| `POST` | `/auth/login`    | Autentica o usuário           |
+| `GET`  | `/auth/me`       | Retorna o usuário autenticado |
+| `POST` | `/auth/refresh`  | Renova o Access Token         |
+| `POST` | `/auth/logout`   | Finaliza a sessão             |
+| `GET`  | `/health`        | Verifica a saúde da API       |
+
+## Exemplos de uso
+
+### Cadastro
+
+```http
 POST /auth/register
+Content-Type: application/json
+
+{
+  "name": "Jean",
+  "email": "jean@example.com",
+  "password": "senhaSegura123"
+}
+```
+
+### Login
+
+```http
 POST /auth/login
-GET  /auth/me
+Content-Type: application/json
+
+{
+  "email": "jean@example.com",
+  "password": "senhaSegura123"
+}
+```
+
+Resposta:
+
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiJ9..."
+}
+```
+
+O Refresh Token é enviado separadamente através de um cookie HttpOnly.
+
+### Requisição autenticada
+
+```http
+GET /auth/me
+Authorization: Bearer <accessToken>
+```
+
+### Refresh
+
+```http
 POST /auth/refresh
+```
+
+O servidor lê o Refresh Token, valida a sessão e executa a rotação.
+
+Uma nova sessão e um novo Refresh Token são criados.
+
+### Logout
+
+```http
 POST /auth/logout
+```
 
-## Objetivo do projeto
+O logout revoga a sessão associada ao Refresh Token atual e remove o cookie.
 
-O objetivo principal do J-Identity não é apenas criar uma API de autenticação.
-
-O projeto está sendo utilizado para compreender e implementar, na prática, conceitos de engenharia de software e segurança envolvidos em um serviço de identidade real, incluindo:
-
-arquitetura em camadas;
-autenticação stateless;
-JWT;
-access tokens;
-refresh tokens;
-hashing;
-gerenciamento de sessões;
-refresh token rotation;
-token families;
-detecção de reutilização;
-revogação;
-transações;
-consistência de dados;
-segurança de credenciais;
-separação de responsabilidades;
-integração entre aplicação, ORM e banco de dados.
-
-A implementação será evoluída gradualmente, mantendo o foco em compreender o motivo de cada decisão arquitetural antes de adicionar novas funcionalidades. -->
+O fluxo é idempotente: tentar fazer logout novamente não deve produzir erro para o cliente.
 
 ## Contrato de erros
 
-### Contrato padrão
+A API utiliza um formato padronizado para respostas de erro:
 
+```json
 {
-error: "ERROR_CODE",
-message: "Mensagem"
+  "error": "ERROR_CODE",
+  "message": "Mensagem amigável"
 }
+```
 
-### Código de erros
+Principais códigos públicos:
 
-Autenticação:
+* `VALIDATION_ERROR` — dados da requisição inválidos
+* `INVALID_CREDENTIALS` — credenciais inválidas
+* `UNAUTHORIZED` — autenticação não permitida
+* `TOKEN_EXPIRED` — Access Token expirado
+* `INVALID_TOKEN` — token inválido ou malformado
+* `SESSION_EXPIRED` — sessão expirada
+* `EMAIL_ALREADY_EXISTS` — email já cadastrado
+* `INTERNAL_SERVER_ERROR` — erro inesperado
 
-| Código                 | Status | Quando acontece                  |
-| ---------------------- | -----: | -------------------------------- |
-| `INVALID_CREDENTIALS`  |    401 | Email ou senha inválidos         |
-| `UNAUTHORIZED`         |    401 | Access Token ausente ou inválido |
-| `TOKEN_EXPIRED`        |    401 | Access Token expirado            |
-| `INVALID_TOKEN`        |    401 | Token malformado ou inválido     |
-| `SESSION_NOT_FOUND`    |    401 | Sessão não encontrada            |
-| `SESSION_EXPIRED`      |    401 | Sessão expirada                  |
-| `SESSION_REVOKED`      |    401 | Sessão revogada                  |
-| `REFRESH_TOKEN_REUSED` |    401 | Refresh Token reutilizado        |
+Erros internos ou detalhes operacionais não devem ser expostos ao cliente.
 
-Usuários:
+## Segurança
 
-| Código                 | Status | Quando acontece        |
-| ---------------------- | -----: | ---------------------- |
-| `USER_NOT_FOUND`       |    404 | Usuário não encontrado |
-| `USER_INACTIVE`        |    403 | Usuário desativado     |
-| `EMAIL_ALREADY_EXISTS` |    409 | Email já registrado    |
+A implementação atual inclui:
 
-Validação:
+* senhas protegidas com `bcrypt`
+* Refresh Tokens armazenados apenas como hash
+* Refresh Token enviado em cookie `HttpOnly`
+* Access Token separado do Refresh Token
+* Refresh Token Rotation
+* Reuse Detection
+* revogação de famílias de sessão
+* validação de dados com Zod
+* tratamento centralizado de erros
+* proteção de rotas via JWT
+* bloqueio de usuários inativos nos fluxos de autenticação
+* tratamento de condição de corrida para emails únicos
 
-| Código             | Status | Quando acontece              |
-| ------------------ | -----: | ---------------------------- |
-| `VALIDATION_ERROR` |    400 | Dados enviados são inválidos |
+## Cookies e CORS
 
-Servidor: 
+A API utiliza cookies para transportar o Refresh Token em clientes web.
 
-| Código                  | Status | Quando acontece |
-| ----------------------- | -----: | --------------- |
-| `INTERNAL_SERVER_ERROR` |    500 | Erro inesperado |
+A configuração atual considera:
+
+* `httpOnly`
+* `secure`
+* `sameSite`
+* `path`
+* `maxAge`
+
+A configuração definitiva depende da arquitetura de deployment.
+
+Por exemplo, aplicações hospedadas em subdomínios do mesmo domínio podem ter requisitos diferentes de aplicações hospedadas em sites distintos.
+
+O CORS também deve ser configurado explicitamente para permitir apenas origens autorizadas quando `credentials` estiver habilitado.
+
+## Integração com SDK
+
+O projeto possui um SDK complementar, `j-identity-sdk`, responsável por facilitar o consumo da API por aplicações clientes.
+
+O SDK abstrai operações como:
+
+* registro
+* login
+* obtenção do usuário autenticado
+* refresh
+* logout
+
+Exemplo conceitual:
+
+```ts
+import { createAuthClient } from "j-identity-sdk";
+
+const auth = createAuthClient({
+  apiUrl: "https://j-identity.jeancelin.dev",
+  platform: "web",
+});
+
+await auth.login("user@example.com", "password");
+```
+
+A API permanece independente do SDK e pode ser consumida diretamente via HTTP.
+
+## Variáveis de ambiente
+
+```env
+DATABASE_URL="postgresql://user:password@host:5432/database"
+
+JWT_SECRET="chave-secreta"
+
+PORT=3001
+
+NODE_ENV="development"
+
+CORS_ORIGINS="http://localhost:3000"
+```
+
+## Status atual
+
+A implementação atual cobre o núcleo do ciclo de autenticação:
+
+* cadastro de usuários
+* login
+* Access Token
+* Refresh Token
+* sessões persistidas
+* Refresh Token Rotation
+* Reuse Detection
+* Session Revocation
+* Logout idempotente
+* proteção de rotas
+* validação de requisições
+* tratamento centralizado de erros
+* bloqueio de usuários inativos
+
+Recursos como recuperação de senha, confirmação de email, OAuth, roles e permissões ainda não fazem parte da implementação atual.
+
+## Objetivo
+
+O J-Identity funciona como um serviço reutilizável de identidade.
+
+A proposta é permitir que diferentes aplicações deleguem autenticação e gerenciamento de sessões a uma API centralizada, mantendo a lógica de segurança relacionada à identidade em um único serviço.

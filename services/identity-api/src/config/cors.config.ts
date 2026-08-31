@@ -1,11 +1,15 @@
 import cors from "cors";
 
 const allowedOrigins =
-  process.env.CORS_ORIGINS?.split(",").map((origin) => origin.trim()) ?? [];
+  process.env.CORS_ORIGINS
+    ?.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean) ?? [];
 
 export const corsMiddleware = cors({
   origin(origin, callback) {
-     console.log("Origin recebida:", origin);
+    console.log("Origin recebida:", origin);
+
     // Permite requisições sem Origin, como ferramentas de backend e testes.
     if (!origin) {
       return callback(null, true);

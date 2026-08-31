@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { AppError } from "../errors/app-error.js";
+import { ZodError } from "zod";
 
 export function errorHandler(
   err: unknown,
@@ -13,6 +14,15 @@ export function errorHandler(
       message: err.message,
     });
   }
+
+  if (err instanceof ZodError) {
+    return res.status(400).json({
+      error: "VALIDATION_ERROR",
+      message: "Dados inválidos",
+    });
+  }
+
+
 
   console.error(err);
 

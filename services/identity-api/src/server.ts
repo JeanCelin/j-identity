@@ -11,7 +11,7 @@ import { errorHandler } from "./middleware/error-handler.js";
 
 const app = express();
 
-const PORT = 3001;
+const PORT = Number(process.env.PORT) || 3001;
 
 app.use(express.json());
 app.use(cookieParser());
@@ -29,6 +29,8 @@ app.get("/health", (request, response) => {
 });
 
 app.use(errorHandler);
+
+
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
