@@ -8,7 +8,6 @@ const allowedOrigins =
 
 export const corsMiddleware = cors({
   origin(origin, callback) {
-    console.log("Origin recebida:", origin);
 
     // Permite requisições sem Origin, como ferramentas de backend e testes.
     if (!origin) {
