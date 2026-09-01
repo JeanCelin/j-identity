@@ -4,11 +4,13 @@
   "description": "Identity service for Jean platform",
   "main": "dist/server.js",
   "type": "module",
+
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/server.js"
-  },
+  }
+,
   "dependencies": {
     "@prisma/client": "^6.19.3",
     "bcrypt": "^6.0.0",
