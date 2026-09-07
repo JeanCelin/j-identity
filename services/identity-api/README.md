@@ -13,11 +13,11 @@ Fluxo principal:
 1. Uma aplicação cliente é criada por um administrador
 2. Usuário se registra em `/auth/register` usando as credenciais da aplicação
 3. Faz login em `/auth/login` usando as credenciais da aplicação
-4. Recebe um Access Token na resposta
-5. O Refresh Token é armazenado em cookie HttpOnly
+4. Recebe um Access Token e um Refresh Token na resposta
+5. Mantém o Refresh Token para solicitar novas sessões
 6. Usa o Access Token no header `Authorization: Bearer <token>`
 7. Renova a autenticação via `/auth/refresh`
-8. Finaliza a sessão em `/auth/logout`
+8. Finaliza a sessão via `/auth/logout`
 
 ## Arquitetura
 
@@ -120,9 +120,9 @@ Características:
 - nunca armazenado em texto puro no banco
 - armazenado apenas como hash SHA-256
 - expiração atual de 30 dias
-- enviado ao cliente através de cookie HttpOnly
+- retornado no corpo da resposta de login e refresh
 
-O navegador envia o Refresh Token automaticamente quando a configuração de cookies permite.
+O cliente deve enviar o Refresh Token no corpo das requisições de refresh e logout.
 
 ### Credenciais da aplicação cliente
 
@@ -215,11 +215,10 @@ Resposta:
 
 ```json
 {
-  "accessToken": "eyJhbGciOiJIUzI1NiJ9..."
+  "accessToken": "eyJhbGciOiJIUzI1NiJ9...",
+  "refreshToken": "..."
 }
 ```
-
-O Refresh Token é enviado separadamente através de um cookie HttpOnly.
 
 ### Requisição autenticada
 
@@ -232,19 +231,29 @@ Authorization: Bearer <accessToken>
 
 ```http
 POST /auth/refresh
+Content-Type: application/json
+
+{
+      "refreshToken": "<refreshToken>"
+}
 ```
 
 O servidor lê o Refresh Token, valida a sessão e executa a rotação.
 
-Uma nova sessão e um novo Refresh Token são criados.
+Uma nova sessão e um novo Refresh Token são criados e retornados no corpo da resposta.
 
 ### Logout
 
 ```http
 POST /auth/logout
+Content-Type: application/json
+
+{
+      "refreshToken": "<refreshToken>"
+}
 ```
 
-O logout revoga a sessão associada ao Refresh Token atual e remove o cookie.
+O logout revoga a sessão associada ao Refresh Token informado.
 
 O fluxo é idempotente: tentar fazer logout novamente não deve produzir erro para o cliente.
 
@@ -333,7 +342,7 @@ A implementação atual inclui:
 
 - senhas protegidas com `bcrypt`
 - Refresh Tokens armazenados apenas como hash
-- Refresh Token enviado em cookie `HttpOnly`
+- Refresh Token retornado explicitamente nas respostas de autenticação
 - Access Token separado do Refresh Token
 - Refresh Token Rotation
 - Reuse Detection
@@ -347,23 +356,11 @@ A implementação atual inclui:
 - bloqueio de usuários inativos nos fluxos de autenticação
 - tratamento de condição de corrida para emails únicos
 
-## Cookies e CORS
+## CORS
 
-A API utiliza cookies para transportar o Refresh Token em clientes web.
-
-A configuração atual considera:
-
-- `httpOnly`
-- `secure`
-- `sameSite`
-- `path`
-- `maxAge`
-
-A configuração definitiva depende da arquitetura de deployment.
-
-Por exemplo, aplicações hospedadas em subdomínios do mesmo domínio podem ter requisitos diferentes de aplicações hospedadas em sites distintos.
-
-O CORS também deve ser configurado explicitamente para permitir apenas origens autorizadas quando `credentials` estiver habilitado.
+O CORS deve ser configurado explicitamente para permitir apenas origens
+autorizadas. Como o Refresh Token é enviado no corpo das requisições, o cliente
+não depende de credenciais de cookie para os fluxos de autenticação.
 
 ## Integração com SDK
 
@@ -387,7 +384,12 @@ const auth = createAuthClient({
   platform: "web",
 });
 
-await auth.login("user@example.com", "password");
+await auth.login(
+  "user@example.com",
+  "password",
+  "<clientId>",
+  "<clientSecret>",
+);
 ```
 
 A API permanece independente do SDK e pode ser consumida diretamente via HTTP.
