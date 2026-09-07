@@ -11,7 +11,9 @@ export type ErrorCode =
   | "USER_INACTIVE"
   | "EMAIL_ALREADY_EXISTS"
   | "VALIDATION_ERROR"
-  | "INTERNAL_SERVER_ERROR";
+  | "INTERNAL_SERVER_ERROR"
+  | "INVALID_CLIENT"
+  | "FORBIDDEN"
 
 export interface ApiErrorResponse {
   error: ErrorCode;

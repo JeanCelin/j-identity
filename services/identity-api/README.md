@@ -32,6 +32,9 @@ A API segue uma arquitetura em camadas:
 * `config/` — configurações como cookies e CORS
 * `prisma/` — schema e migrations do banco de dados
 
+Rotas administrativas são expostas sob o prefixo `/admin` e exigem um Access
+Token válido de um usuário com papel `ADMIN`.
+
 A separação tem como objetivo evitar que regras de negócio fiquem acopladas diretamente ao Express ou ao banco de dados.
 
 ## Stack
@@ -58,6 +61,7 @@ Representa uma identidade da aplicação.
 * `passwordHash` — senha armazenada como hash
 * `emailVerified` — status de verificação do email
 * `isActive` — estado ativo/inativo da conta
+* `role` — papel do usuário (`USER` ou `ADMIN`)
 * `createdAt`
 * `updatedAt`
 
@@ -72,6 +76,18 @@ Representa uma sessão associada a um Refresh Token.
 * `expiresAt` — data de expiração
 * `revokedAt` — data de revogação
 * `createdAt`
+
+### ClientApplication
+
+Representa uma aplicação cliente autorizada a consumir a API.
+
+* `id` — identificador da aplicação
+* `name` — nome da aplicação
+* `clientId` — identificador público único
+* `clientSecretHash` — hash do segredo da aplicação
+* `isActive` — estado ativo/inativo da aplicação
+* `createdAt`
+* `updatedAt`
 
 ## Autenticação
 
@@ -154,6 +170,7 @@ A informação detalhada sobre reuse detection é mantida internamente. A API n�
 | `GET`  | `/auth/me`       | Retorna o usuário autenticado |
 | `POST` | `/auth/refresh`  | Renova o Access Token         |
 | `POST` | `/auth/logout`   | Finaliza a sessão             |
+| `POST` | `/admin/client-applications` | Cria uma aplicação cliente (ADMIN) |
 | `GET`  | `/health`        | Verifica a saúde da API       |
 
 ## Exemplos de uso
@@ -220,6 +237,24 @@ O logout revoga a sessão associada ao Refresh Token atual e remove o cookie.
 
 O fluxo é idempotente: tentar fazer logout novamente não deve produzir erro para o cliente.
 
+### Criação de aplicação cliente
+
+A criação de aplicações é restrita a usuários com papel `ADMIN` e exige um
+Access Token no header `Authorization`.
+
+```http
+POST /admin/client-applications
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+{
+      "name": "Minha aplicação"
+}
+```
+
+O `clientSecret` é retornado somente na criação. A API armazena apenas o hash
+desse segredo.
+
 ## Contrato de erros
 
 A API utiliza um formato padronizado para respostas de erro:
@@ -231,16 +266,26 @@ A API utiliza um formato padronizado para respostas de erro:
 }
 ```
 
-Principais códigos públicos:
+Os códigos definidos no contrato são:
 
 * `VALIDATION_ERROR` — dados da requisição inválidos
 * `INVALID_CREDENTIALS` — credenciais inválidas
 * `UNAUTHORIZED` — autenticação não permitida
+* `FORBIDDEN` — usuário autenticado sem permissão para o recurso
 * `TOKEN_EXPIRED` — Access Token expirado
 * `INVALID_TOKEN` — token inválido ou malformado
+* `INVALID_CLIENT` — aplicação cliente inexistente, inativa ou com segredo inválido
+* `SESSION_NOT_FOUND` — sessão não encontrada
 * `SESSION_EXPIRED` — sessão expirada
+* `SESSION_REVOKED` — sessão revogada
+* `REFRESH_TOKEN_REUSED` — Refresh Token reutilizado
+* `USER_NOT_FOUND` — usuário não encontrado
+* `USER_INACTIVE` — usuário inativo
 * `EMAIL_ALREADY_EXISTS` — email já cadastrado
 * `INTERNAL_SERVER_ERROR` — erro inesperado
+
+Condições sensíveis de autenticação podem ser normalizadas como `UNAUTHORIZED`
+para não expor detalhes internos do fluxo de sessão.
 
 Erros internos ou detalhes operacionais não devem ser expostos ao cliente.
 
@@ -258,6 +303,9 @@ A implementação atual inclui:
 * validação de dados com Zod
 * tratamento centralizado de erros
 * proteção de rotas via JWT
+* controle de acesso por papel (`USER` e `ADMIN`)
+* cadastro administrativo de aplicações clientes
+* segredos de aplicações clientes armazenados apenas como hash
 * bloqueio de usuários inativos nos fluxos de autenticação
 * tratamento de condição de corrida para emails únicos
 
@@ -334,11 +382,15 @@ A implementação atual cobre o núcleo do ciclo de autenticação:
 * Session Revocation
 * Logout idempotente
 * proteção de rotas
+* papéis de usuário (`USER` e `ADMIN`)
+* aplicações clientes com `clientId` e `clientSecret`
+* rota administrativa para criação de aplicações clientes
 * validação de requisições
 * tratamento centralizado de erros
 * bloqueio de usuários inativos
 
-Recursos como recuperação de senha, confirmação de email, OAuth, roles e permissões ainda não fazem parte da implementação atual.
+Recursos como recuperação de senha, confirmação de email, OAuth e permissões
+granulares ainda não fazem parte da implementação atual.
 
 ## Objetivo
 

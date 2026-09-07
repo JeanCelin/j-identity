@@ -1,8 +1,10 @@
 import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { AppError } from "../errors/app-error.js";
+import { findUserById } from "../repositories/user.repository.js";
 
-export function authenticateMiddleware(
+
+export async function authenticateMiddleware(
   req: Request,
   res: Response,
   next: NextFunction,
@@ -11,21 +13,13 @@ export function authenticateMiddleware(
     const authorization = req.headers.authorization;
 
     if (!authorization) {
-      throw new AppError(
-        "UNAUTHORIZED",
-        "Não autorizado",
-        401,
-      );
+      throw new AppError("UNAUTHORIZED", "Não autorizado", 401);
     }
 
     const [scheme, token] = authorization.split(" ");
 
     if (scheme !== "Bearer" || !token) {
-      throw new AppError(
-        "INVALID_TOKEN",
-        "Token inválido",
-        401,
-      );
+      throw new AppError("INVALID_TOKEN", "Token inválido", 401);
     }
 
     const jwtSecret = process.env.JWT_SECRET;
@@ -41,23 +35,21 @@ export function authenticateMiddleware(
     const decoded = jwt.verify(token, jwtSecret);
 
     if (typeof decoded !== "object" || decoded === null) {
-      throw new AppError(
-        "INVALID_TOKEN",
-        "Token inválido",
-        401,
-      );
+      throw new AppError("INVALID_TOKEN", "Token inválido", 401);
     }
 
     if (typeof decoded.sub !== "string") {
-      throw new AppError(
-        "INVALID_TOKEN",
-        "Token inválido",
-        401,
-      );
+      throw new AppError("INVALID_TOKEN", "Token inválido", 401);
+    }
+    const user = await findUserById(decoded.sub);
+
+    if (!user || !user.isActive) {
+      throw new AppError("UNAUTHORIZED", "Não autorizado", 401);
     }
 
     req.user = {
-      id: decoded.sub,
+      id: user.id,
+      role: user.role,
     };
 
     return next();
@@ -67,23 +59,11 @@ export function authenticateMiddleware(
     }
 
     if (err instanceof jwt.TokenExpiredError) {
-      return next(
-        new AppError(
-          "TOKEN_EXPIRED",
-          "Token expirado",
-          401,
-        ),
-      );
+      return next(new AppError("TOKEN_EXPIRED", "Token expirado", 401));
     }
 
     if (err instanceof jwt.JsonWebTokenError) {
-      return next(
-        new AppError(
-          "INVALID_TOKEN",
-          "Token inválido",
-          401,
-        ),
-      );
+      return next(new AppError("INVALID_TOKEN", "Token inválido", 401));
     }
 
     return next(err);

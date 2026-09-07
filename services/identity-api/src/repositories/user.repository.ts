@@ -27,6 +27,7 @@ export function findUserById(id: string) {
       id: true,
       name: true,
       email: true,
+      role: true,
       emailVerified: true,
       isActive: true,
       createdAt: true,
