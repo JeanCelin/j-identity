@@ -25,13 +25,23 @@ import { prisma } from "../lib/prisma.js";
 import { AppError } from "../errors/app-error.js";
 import { Prisma } from "@prisma/client";
 
+import { validateClientApplication } from "./client-application.service.js";
+
 type RegisterData = {
   name: string;
   email: string;
   password: string;
+  clientId: string;
+  clientSecret: string;
 };
 
 export async function registerUser(data: RegisterData) {
+  
+
+await validateClientApplication(data.clientId, data.clientSecret);
+
+
+
   const existingUser = await findUserByEmail(data.email);
 
   if (existingUser) {
@@ -44,8 +54,7 @@ export async function registerUser(data: RegisterData) {
 
   const passwordHash = await bcrypt.hash(data.password, 12);
 
-
-    try {
+  try {
     const user = await createUser({
       name: data.name,
       email: data.email,
@@ -71,7 +80,17 @@ export async function registerUser(data: RegisterData) {
   }
 }
 
-export async function loginUser(email: string, password: string) {
+export async function loginUser(
+  email: string,
+  password: string,
+  clientId: string,
+  clientSecret: string,
+) {
+
+
+ await validateClientApplication(clientId, clientSecret);
+
+
   const user = await findUserByEmail(email);
 
   /*
@@ -124,11 +143,7 @@ export async function getUser(id: string) {
   const user = await findUserById(id);
 
   if (!user || !user.isActive) {
-    throw new AppError(
-      "UNAUTHORIZED",
-      "Não autorizado",
-      401,
-    );
+    throw new AppError("UNAUTHORIZED", "Não autorizado", 401);
   }
 
   return user;

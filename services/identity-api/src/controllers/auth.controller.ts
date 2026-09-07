@@ -39,6 +39,8 @@ export async function login(req: Request, res: Response, next: NextFunction) {
     const { accessToken, refreshToken } = await loginUser(
       data.email,
       data.password,
+      data.clientId,
+      data.clientSecret
     );
 
     res.cookie(REFRESH_TOKEN_COOKIE, refreshToken, refreshTokenCookieOptions);
