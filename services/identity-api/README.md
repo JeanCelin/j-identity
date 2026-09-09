@@ -6,18 +6,41 @@ A API pode ser consumida diretamente via HTTP ou através do projeto complementa
 
 ## Visão geral
 
-A aplicação expõe suas rotas de autenticação sob o prefixo `/auth` e fornece um endpoint de saúde em `/health`.
+A aplicação fornece autenticação administrativa sob o prefixo `/admin`, autenticação de usuários de aplicações clientes sob `/auth` e um endpoint de saúde em `/health`.
 
-Fluxo principal:
+O fluxo geral possui duas etapas:
 
-1. Uma aplicação cliente é criada por um administrador
-2. Usuário se registra em `/auth/register` usando as credenciais da aplicação
-3. Faz login em `/auth/login` usando as credenciais da aplicação
-4. Recebe o Access Token e o Refresh Token na resposta JSON
-5. A aplicação consumidora armazena os tokens e os envia explicitamente quando necessário
-6. Usa o Access Token no header `Authorization: Bearer <token>`
-7. Renova a autenticação via `/auth/refresh`, enviando o Refresh Token e as credenciais da aplicação
-8. Finaliza a sessão em `/auth/logout`, enviando o Refresh Token e as credenciais da aplicação
+**Bootstrap administrativo:**
+
+```text
+create-admin → /admin/login → /admin/client-applications
+```
+
+O administrador é criado pelo script, autentica-se diretamente com email e
+senha em `/admin/login` e usa o Access Token retornado para criar a primeira
+`ClientApplication`. A `ClientApplication` não é necessária para o login
+administrativo; essa separação evita uma dependência circular no bootstrap.
+
+**Fluxo de uma aplicação cliente:**
+
+```text
+clientId + clientSecret
+  ↓
+/auth/register
+  ↓
+/auth/login
+  ↓
+Access Token + Refresh Token
+  ↓
+/auth/me
+  ↓
+/auth/refresh
+  ↓
+/auth/logout
+```
+
+As rotas `/auth/*` exigem as credenciais da `ClientApplication` e as sessões
+normais ficam vinculadas a ela.
 
 ## Arquitetura
 
@@ -33,8 +56,11 @@ A API segue uma arquitetura em camadas:
 - `config/` — configurações como cookies e CORS
 - `prisma/` — schema e migrations do banco de dados
 
-Rotas administrativas são expostas sob o prefixo `/admin` e exigem um Access
-Token válido de um usuário com papel `ADMIN`.
+Rotas administrativas são expostas sob o prefixo `/admin` e, quando protegidas,
+exigem um Access Token JWT válido de um usuário com papel `ADMIN`. O endpoint
+`/admin/login` é uma exceção intencional: ele é público por ser o ponto de
+entrada da autenticação administrativa, mas somente credenciais de um usuário
+`ADMIN` permitem obter o token.
 
 A separação tem como objetivo evitar que regras de negócio fiquem acopladas diretamente ao Express ou ao banco de dados.
 
@@ -50,7 +76,6 @@ A separação tem como objetivo evitar que regras de negócio fiquem acopladas d
 - Zod
 - CORS
 
-
 ## Instalação
 
 ### Pré-requisitos
@@ -62,7 +87,7 @@ Antes de instalar o J-Identity API, você precisa ter:
 - Um banco de dados compatível com o Prisma
 - Git, caso esteja clonando o repositório
 
-A implementação atual utiliza postgreSQL.
+A implementação atual utiliza PostgreSQL.
 
 ### 1. Clonar o projeto
 
@@ -142,7 +167,10 @@ npx prisma generate
 
 ### Usando outro banco de dados
 
-O J-Identity utiliza Prisma, portanto outros bancos podem ser utilizados desde que sejam suportados pela versão do Prisma utilizada pelo projeto.
+O J-Identity utiliza Prisma, portanto o projeto pode ser adaptado para outros
+providers suportados pela versão do Prisma utilizada, desde que o schema e as
+migrations sejam compatíveis. A implementação atual e as migrations incluídas
+utilizam PostgreSQL.
 
 Para trocar o banco:
 
@@ -160,6 +188,7 @@ datasource db {
 }
 
 ```
+
 E no .env adicione: DATABASE_URL="mysql://USER:PASSWORD@HOST:3306/DATABASE"
 
 A API não acessa o banco diretamente através das rotas. O acesso é feito através do Prisma, portanto a camada de persistência fica concentrada no repositories/ e no schema do Prisma.
@@ -167,6 +196,7 @@ A API não acessa o banco diretamente através das rotas. O acesso é feito atra
 ### 5. Criar o primeiro administrador
 
 Depois que o banco estiver configurado:
+
 ```bash
 
 npm run create-admin
@@ -175,9 +205,9 @@ npm run create-admin
 
 O script solicitará:
 
-* nome
-* email
-* senha
+- nome
+- email
+- senha
 
 A senha deve possuir pelo menos 8 caracteres.
 
@@ -194,13 +224,15 @@ A resposta esperada é {"status": "ok"}
 
 ### 7. Criar uma aplicação cliente
 
-Depois de criar o administrador e iniciar a API, obtenha um Access Token autenticando o administrador.
+Depois de criar o administrador e iniciar a API, obtenha um Access Token
+administrativo autenticando-o em `/admin/login`. A `ClientApplication` não é
+necessária para esse login.
 Em seguida, faça uma requisição:
 
 ```http
 
 POST /admin/client-applications
-Authorization: Bearer accessToken
+Authorization: Bearer <adminAccessToken>
 Content-Type: application/json
 
 {
@@ -212,7 +244,6 @@ Content-Type: application/json
 A API retornará:
 
 ```json
-
 {
   "client": {
     "id": "...",
@@ -223,8 +254,8 @@ A API retornará:
     "createdAt": "..."
   }
 }
-
 ```
+
 O clientSecret deve ser armazenado com segurança pela aplicação cliente.
 
 Ele é exibido somente no momento da criação e não é armazenado em texto puro pela API.
@@ -233,6 +264,7 @@ Ele é exibido somente no momento da criação e não é armazenado em texto pur
 
 Com o clientId e o clientSecret, uma aplicação pode realizar o cadastro e login de usuários.
 Exemplo:
+
 ```http
 POST /auth/login
 Content-Type: application/json
@@ -245,23 +277,71 @@ Content-Type: application/json
 }
 
 ```
+
 A resposta contém:
 
 ```json
-
 {
   "accessToken": "...",
   "refreshToken": "..."
 }
-
-
 ```
+
 A partir desse ponto, a aplicação cliente é responsável por armazenar os tokens de acordo com sua própria arquitetura.
+
+## Bootstrap inicial
+
+O bootstrap não depende de uma `ClientApplication`. Execute os passos a seguir
+na pasta `services/identity-api`:
+
+1. Configure o `.env` e o `DATABASE_URL`.
+2. Execute as migrations com `npx prisma migrate deploy` e gere o cliente com
+   `npx prisma generate`.
+3. Crie o primeiro administrador com `npm run create-admin`.
+4. Inicie a API com `npm run dev`.
+5. Faça login administrativo:
+
+```http
+POST /admin/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "senhaSegura123"
+}
+```
+
+Resposta:
+
+```json
+{
+  "accessToken": "eyJ..."
+}
+```
+
+6. Use o Access Token administrativo para criar a primeira aplicação:
+
+```http
+POST /admin/client-applications
+Authorization: Bearer <adminAccessToken>
+Content-Type: application/json
+
+{
+  "name": "Minha aplicação"
+}
+```
+
+7. Guarde o `clientId` e o `clientSecret` retornados. O segredo é exibido
+   somente nessa criação e deve ser mantido em segredo pela aplicação
+   consumidora.
+8. Use essas credenciais nas rotas `/auth/register`, `/auth/login`,
+   `/auth/refresh` e `/auth/logout`.
 
 ### 9. Usar o SDK (Opcional)
 
 Para aplicações server-side, também é possível utilizar o j-identity-sdk.
 O SDK precisa ser configurado com:
+
 ```TypeScript
 
 const auth = createAuthClient({
@@ -271,10 +351,12 @@ const auth = createAuthClient({
 });
 
 ```
+
 O clientSecret nunca deve ser enviado para o navegador ou para uma aplicação mobile.
 
 O SDK foi projetado para executar no ambiente server-side da aplicação consumidora.
-
+O fluxo administrativo é realizado diretamente contra `/admin/login`; o SDK
+não é um mecanismo de login administrativo.
 
 ## Modelo de dados
 
@@ -325,7 +407,10 @@ apenas seu hash.
 
 ### Access Token
 
-O Access Token é um JWT utilizado para autenticar requisições protegidas.
+O Access Token é um JWT utilizado para autenticar requisições protegidas, tanto
+no fluxo administrativo quanto no fluxo das aplicações clientes. O login
+administrativo em `/admin/login` retorna apenas um Access Token; não existe
+Refresh Token administrativo.
 
 Características:
 
@@ -339,7 +424,11 @@ Authorization: Bearer <accessToken>
 
 O token contém o identificador do usuário no claim `sub`.
 
-O Access Token é mantido pelo cliente e não é persistido pela API.
+O `authenticateMiddleware` consulta o usuário pelo `sub`, verifica se ele está
+ativo e recupera seu papel atual (`USER` ou `ADMIN`) antes de permitir o acesso.
+O `requireAdminMiddleware` restringe as rotas administrativas protegidas aos
+usuários com papel `ADMIN`. O Access Token é mantido pelo cliente e não é
+persistido pela API.
 
 ### Refresh Token
 
@@ -408,17 +497,47 @@ A informação detalhada sobre reuse detection é mantida internamente. A API n�
 
 ## Endpoints
 
-| Método | Rota                         | Descrição                          |
-| ------ | ---------------------------- | ---------------------------------- |
-| `POST` | `/auth/register`             | Cria um usuário                    |
-| `POST` | `/auth/login`                | Autentica o usuário                |
-| `GET`  | `/auth/me`                   | Retorna o usuário autenticado      |
-| `POST` | `/auth/refresh`              | Renova os tokens                   |
-| `POST` | `/auth/logout`               | Revoga a sessão                    |
-| `POST` | `/admin/client-applications` | Cria uma aplicação cliente (ADMIN) |
-| `GET`  | `/health`                    | Verifica a saúde da API            |
+| Método | Rota                         | Descrição                         |
+| ------ | ---------------------------- | --------------------------------- |
+| `POST` | `/admin/login`               | Autentica o administrador         |
+| `POST` | `/admin/client-applications` | Cria uma aplicação, somente ADMIN |
+| `POST` | `/auth/register`             | Cria um usuário                   |
+| `POST` | `/auth/login`                | Autentica o usuário               |
+| `GET`  | `/auth/me`                   | Retorna o usuário autenticado     |
+| `POST` | `/auth/refresh`              | Renova os tokens                  |
+| `POST` | `/auth/logout`               | Revoga a sessão                   |
+| `GET`  | `/health`                    | Verifica a saúde da API           |
 
 ## Exemplos de uso
+
+### Login administrativo
+
+O login administrativo não exige `clientId` nem `clientSecret`. O usuário deve
+existir, estar ativo e possuir o papel `ADMIN`.
+
+```http
+POST /admin/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "senhaSegura123"
+}
+```
+
+Resposta:
+
+```json
+{
+  "accessToken": "eyJ..."
+}
+```
+
+Envie esse token aos endpoints administrativos protegidos:
+
+```http
+Authorization: Bearer <accessToken>
+```
 
 ### Cadastro
 
@@ -429,9 +548,9 @@ Content-Type: application/json
 {
   "name": "Jean",
   "email": "jean@example.com",
-      "password": "senhaSegura123",
-      "clientId": "<clientId>",
-      "clientSecret": "client-secret-exemplo"
+  "password": "senhaSegura123",
+  "clientId": "<clientId>",
+  "clientSecret": "client-secret-exemplo"
 }
 ```
 
@@ -446,9 +565,9 @@ Content-Type: application/json
 
 {
   "email": "jean@example.com",
-      "password": "senhaSegura123",
-      "clientId": "<clientId>",
-      "clientSecret": "client-secret-exemplo"
+  "password": "senhaSegura123",
+  "clientId": "<clientId>",
+  "clientSecret": "client-secret-exemplo"
 }
 ```
 
@@ -478,9 +597,9 @@ POST /auth/refresh
 Content-Type: application/json
 
 {
-      "refreshToken": "refresh-token-exemplo",
-      "clientId": "<clientId>",
-      "clientSecret": "client-secret-exemplo"
+  "refreshToken": "refresh-token-exemplo",
+  "clientId": "<clientId>",
+  "clientSecret": "client-secret-exemplo"
 }
 ```
 
@@ -496,9 +615,9 @@ POST /auth/logout
 Content-Type: application/json
 
 {
-      "refreshToken": "refresh-token-exemplo",
-      "clientId": "<clientId>",
-      "clientSecret": "client-secret-exemplo"
+  "refreshToken": "refresh-token-exemplo",
+  "clientId": "<clientId>",
+  "clientSecret": "client-secret-exemplo"
 }
 ```
 
@@ -510,8 +629,11 @@ O fluxo é idempotente: tentar fazer logout novamente não deve produzir erro pa
 
 ### Criação de aplicação cliente
 
-A criação de aplicações é restrita a usuários com papel `ADMIN` e exige um
-Access Token no header `Authorization`.
+A criação de aplicações ocorre depois do bootstrap do administrador. É restrita
+a usuários com papel `ADMIN` e exige o Access Token retornado por
+`/admin/login` no header `Authorization`. A API gera o `clientId` e o
+`clientSecret`, retorna o segredo somente nessa resposta e armazena apenas o
+hash dele.
 
 ```http
 POST /admin/client-applications
@@ -519,7 +641,7 @@ Authorization: Bearer <accessToken>
 Content-Type: application/json
 
 {
-      "name": "Minha aplicação"
+  "name": "Minha aplicação"
 }
 ```
 
@@ -591,6 +713,14 @@ Erros internos ou detalhes operacionais não devem ser expostos ao cliente.
 
 A implementação atual inclui:
 
+- autenticação administrativa em `/admin/login`, sem dependência de
+  `ClientApplication`
+- criação do primeiro administrador pelo script `create-admin`
+- criação de aplicações restrita a usuários com papel `ADMIN`
+- `/admin/client-applications` protegido por Access Token e pelo
+  `requireAdminMiddleware`
+- `clientSecret` retornado somente na criação e armazenado apenas como hash
+- credenciais `clientId` e `clientSecret` exigidas nas rotas `/auth/*`
 - senhas protegidas com `bcrypt`
 - Refresh Tokens armazenados apenas como hash
 - Refresh Token retornado em JSON e armazenado pelo consumidor
@@ -602,9 +732,8 @@ A implementação atual inclui:
 - tratamento centralizado de erros
 - proteção de rotas via JWT
 - controle de acesso por papel (`USER` e `ADMIN`)
-- cadastro administrativo de aplicações clientes
-- segredos de aplicações clientes armazenados apenas como hash
-- bloqueio de usuários inativos nos fluxos de autenticação
+- bloqueio de usuários inativos nos fluxos administrativo e de aplicações
+- sessões de aplicações clientes vinculadas à `ClientApplication`
 - tratamento de condição de corrida para emails únicos
 
 ## Cookies e CORS
@@ -681,6 +810,11 @@ CORS_ORIGINS="http://localhost:3000"
 
 A implementação atual cobre o núcleo do ciclo de autenticação:
 
+- bootstrap do primeiro administrador via `npm run create-admin`
+- autenticação administrativa via `/admin/login`
+- separação entre o fluxo administrativo e o fluxo de autenticação das
+  aplicações clientes
+- criação protegida de `ClientApplication` por usuários `ADMIN`
 - cadastro de usuários
 - validação de aplicação cliente no cadastro, login, refresh e logout
 - login
@@ -695,8 +829,6 @@ A implementação atual cobre o núcleo do ciclo de autenticação:
 - papéis de usuário (`USER` e `ADMIN`)
 - aplicações clientes com `clientId` e `clientSecret`
 - sessões vinculadas à aplicação cliente por `clientApplicationId`
-- rota administrativa para criação de aplicações clientes
-- script para criação do primeiro administrador
 - validação de requisições
 - tratamento centralizado de erros
 - bloqueio de usuários inativos
