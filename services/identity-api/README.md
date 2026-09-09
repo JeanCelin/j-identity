@@ -50,6 +50,232 @@ A separação tem como objetivo evitar que regras de negócio fiquem acopladas d
 - Zod
 - CORS
 
+
+## Instalação
+
+### Pré-requisitos
+
+Antes de instalar o J-Identity API, você precisa ter:
+
+- Node.js instalado
+- npm instalado
+- Um banco de dados compatível com o Prisma
+- Git, caso esteja clonando o repositório
+
+A implementação atual utiliza postgreSQL.
+
+### 1. Clonar o projeto
+
+```bash
+
+git clone https://github.com/JeanCelin/j-identity.git
+
+cd j-identity/services/identity-api
+
+```
+
+### 2. Instalar as dependências
+
+```bash
+
+npm install
+
+```
+
+### 3. Configurar as variáveis de ambiente
+
+Crie um arquivo .env na pasta services/identity-api:
+
+```env
+
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE"
+
+JWT_SECRET="uma-chave-secreta-forte"
+
+NODE_ENV=development
+
+CORS_ORIGINS="http://localhost:3000,http://localhost:5173"
+
+ PORT=3001
+
+```
+
+Nunca compartilhe o arquivo .env ou publique seus valores reais.
+
+### 4. Configurar o banco de dados
+
+A API utiliza Prisma para acesso ao banco de dados.
+
+```bash
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+
+}
+
+```
+
+Depois de configurar o DATABASE_URL, execute:
+
+```bash
+
+npx prisma migrate deploy
+
+```
+
+Para desenvolvimento, quando forem necessárias novas migrations:
+
+```bash
+
+npx prisma migrate dev
+
+```
+
+Depois gere o Prisma Client:
+
+```bash
+
+npx prisma generate
+
+```
+
+### Usando outro banco de dados
+
+O J-Identity utiliza Prisma, portanto outros bancos podem ser utilizados desde que sejam suportados pela versão do Prisma utilizada pelo projeto.
+
+Para trocar o banco:
+
+1. Altere o provider em prisma/schema.prisma.
+2. Altere o DATABASE_URL no .env para a URL do novo banco.
+3. Verifique se o schema Prisma é compatível com o novo provider.
+4. Crie novas migrations para o banco escolhido.
+5. Gere novamente o Prisma Client.
+
+```bash
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+```
+E no .env adicione: DATABASE_URL="mysql://USER:PASSWORD@HOST:3306/DATABASE"
+
+A API não acessa o banco diretamente através das rotas. O acesso é feito através do Prisma, portanto a camada de persistência fica concentrada no repositories/ e no schema do Prisma.
+
+### 5. Criar o primeiro administrador
+
+Depois que o banco estiver configurado:
+```bash
+
+npm run create-admin
+
+```
+
+O script solicitará:
+
+* nome
+* email
+* senha
+
+A senha deve possuir pelo menos 8 caracteres.
+
+O usuário criado receberá o papel: ADMIN
+
+### 6. Iniciar a API
+
+Para desenvolvimento rode: npm run dev
+A API será iniciada na porta configurada em "PORT" no .env
+por padrão http://localhost:3001
+
+Você pode verificar se a API está funcionando através de GET /health.
+A resposta esperada é {"status": "ok"}
+
+### 7. Criar uma aplicação cliente
+
+Depois de criar o administrador e iniciar a API, obtenha um Access Token autenticando o administrador.
+Em seguida, faça uma requisição:
+
+```http
+
+POST /admin/client-applications
+Authorization: Bearer accessToken
+Content-Type: application/json
+
+{
+  "name": "Minha aplicação"
+}
+
+```
+
+A API retornará:
+
+```json
+
+{
+  "client": {
+    "id": "...",
+    "name": "Minha aplicação",
+    "clientId": "...",
+    "clientSecret": "...",
+    "isActive": true,
+    "createdAt": "..."
+  }
+}
+
+```
+O clientSecret deve ser armazenado com segurança pela aplicação cliente.
+
+Ele é exibido somente no momento da criação e não é armazenado em texto puro pela API.
+
+### 8. Usar a API
+
+Com o clientId e o clientSecret, uma aplicação pode realizar o cadastro e login de usuários.
+Exemplo:
+```http
+POST /auth/login
+Content-Type: application/json
+
+{
+  "email": "usuario@example.com",
+  "password": "senhaSegura123",
+  "clientId": "clientId",
+  "clientSecret": "clientSecret"
+}
+
+```
+A resposta contém:
+
+```json
+
+{
+  "accessToken": "...",
+  "refreshToken": "..."
+}
+
+
+```
+A partir desse ponto, a aplicação cliente é responsável por armazenar os tokens de acordo com sua própria arquitetura.
+
+### 9. Usar o SDK (Opcional)
+
+Para aplicações server-side, também é possível utilizar o j-identity-sdk.
+O SDK precisa ser configurado com:
+```TypeScript
+
+const auth = createAuthClient({
+  apiUrl: "https://sua-api.com",
+  clientId: process.env.J_IDENTITY_CLIENT_ID!,
+  clientSecret: process.env.J_IDENTITY_CLIENT_SECRET!,
+});
+
+```
+O clientSecret nunca deve ser enviado para o navegador ou para uma aplicação mobile.
+
+O SDK foi projetado para executar no ambiente server-side da aplicação consumidora.
+
+
 ## Modelo de dados
 
 ### User
@@ -415,7 +641,7 @@ O SDK abstrai operações como:
 - refresh
 - logout
 
-Exemplo conceitual:
+Exemplo:
 
 ```ts
 import { createAuthClient } from "j-identity-sdk";
