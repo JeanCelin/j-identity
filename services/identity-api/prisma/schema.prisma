@@ -26,25 +26,27 @@ model User {
 }
 
 model Session {
-  id           String   @id @default(uuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id])
-  familyId     String   @default(uuid())
-  refreshTokenHash String @unique 
-  expiresAt    DateTime
-  revokedAt    DateTime?
-  createdAt    DateTime @default(now())
+  id                  String            @id @default(uuid())
+  userId              String
+  user                User              @relation(fields: [userId], references: [id])
+
+  clientApplicationId String
+  clientApplication   ClientApplication @relation(fields: [clientApplicationId],references: [id] )
+
+  familyId            String            @default(uuid())
+  refreshTokenHash    String            @unique
+  expiresAt           DateTime
+  revokedAt           DateTime?
+  createdAt           DateTime          @default(now())
 }
 
 model ClientApplication {
-  id          String   @id @default(uuid())
-
-  name        String
-  clientId    String   @unique
+  id               String    @id @default(uuid())
+  name             String
+  clientId         String    @unique
   clientSecretHash String
-
-  isActive    Boolean  @default(true)
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  sessions         Session[]
 }

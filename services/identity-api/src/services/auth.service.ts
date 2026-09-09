@@ -36,11 +36,7 @@ type RegisterData = {
 };
 
 export async function registerUser(data: RegisterData) {
-  
-
-await validateClientApplication(data.clientId, data.clientSecret);
-
-
+  await validateClientApplication(data.clientId, data.clientSecret);
 
   const existingUser = await findUserByEmail(data.email);
 
@@ -86,10 +82,10 @@ export async function loginUser(
   clientId: string,
   clientSecret: string,
 ) {
-
-
- await validateClientApplication(clientId, clientSecret);
-
+  const clientApplication = await validateClientApplication(
+    clientId,
+    clientSecret,
+  );
 
   const user = await findUserByEmail(email);
 
@@ -128,6 +124,7 @@ export async function loginUser(
 
   await createSession(
     user.id,
+    clientApplication.id,
     refreshTokenHash,
     refreshTokenExpiresAt,
     familyId,
@@ -149,14 +146,45 @@ export async function getUser(id: string) {
   return user;
 }
 
-export async function refreshAccessToken(refreshToken: string) {
+export async function refreshAccessToken(
+  refreshToken: string,
+  clientId: string,
+  clientSecret: string,
+) {
   try {
+    const clientApplication = await validateClientApplication(
+      clientId,
+      clientSecret,
+    );
+
     const refreshTokenHash = hashRefreshToken(refreshToken);
 
-    const session = await findSessionByRefreshTokenHash(refreshTokenHash);
+    const session = await findSessionByRefreshTokenHash(
+      refreshTokenHash,
+    );
 
     if (!session) {
-      throw new AppError("INVALID_TOKEN", "Token inválido", 401);
+      throw new AppError(
+        "INVALID_TOKEN",
+        "Token inválido",
+        401,
+      );
+    }
+
+    /*
+     * O Refresh Token pertence a uma aplicação específica.
+     *
+     * Uma aplicação não pode utilizar o Refresh Token
+     * pertencente a outra aplicação.
+     */
+    if (
+      session.clientApplicationId !== clientApplication.id
+    ) {
+      throw new AppError(
+        "UNAUTHORIZED",
+        "Falha de autenticação",
+        401,
+      );
     }
 
     /*
@@ -169,11 +197,19 @@ export async function refreshAccessToken(refreshToken: string) {
     if (session.revokedAt) {
       await revokeSessionFamily(session.familyId);
 
-      throw new AppError("UNAUTHORIZED", "Falha de autenticação", 401);
+      throw new AppError(
+        "UNAUTHORIZED",
+        "Falha de autenticação",
+        401,
+      );
     }
 
     if (session.expiresAt <= new Date()) {
-      throw new AppError("SESSION_EXPIRED", "Sessão expirada", 401);
+      throw new AppError(
+        "SESSION_EXPIRED",
+        "Sessão expirada",
+        401,
+      );
     }
 
     const user = await findUserById(session.userId);
@@ -193,7 +229,11 @@ export async function refreshAccessToken(refreshToken: string) {
     }
 
     if (!user.isActive) {
-      throw new AppError("UNAUTHORIZED", "Falha de autenticação", 401);
+      throw new AppError(
+        "UNAUTHORIZED",
+        "Falha de autenticação",
+        401,
+      );
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -210,11 +250,15 @@ export async function refreshAccessToken(refreshToken: string) {
 
       const newRefreshTokenExpiresAt = new Date();
 
-      newRefreshTokenExpiresAt.setDate(newRefreshTokenExpiresAt.getDate() + 30);
+      newRefreshTokenExpiresAt.setDate(
+        newRefreshTokenExpiresAt.getDate() + 30,
+      );
 
-      // Cria a nova sessão na mesma família.
+      // Cria a nova sessão na mesma família
+      // e vinculada à mesma aplicação.
       await createSession(
         user.id,
+        session.clientApplicationId,
         newRefreshTokenHash,
         newRefreshTokenExpiresAt,
         session.familyId,
@@ -249,10 +293,21 @@ export async function refreshAccessToken(refreshToken: string) {
   }
 }
 
-export async function logOut(refreshToken: string) {
+export async function logOut(
+  refreshToken: string,
+  clientId: string,
+  clientSecret: string,
+) {
+  const clientApplication = await validateClientApplication(
+    clientId,
+    clientSecret,
+  );
+
   const refreshTokenHash = hashRefreshToken(refreshToken);
 
-  const session = await findSessionByRefreshTokenHash(refreshTokenHash);
+  const session = await findSessionByRefreshTokenHash(
+    refreshTokenHash,
+  );
 
   /*
    * Logout deve ser idempotente.
@@ -262,6 +317,22 @@ export async function logOut(refreshToken: string) {
    */
   if (!session) {
     return "success";
+  }
+
+  /*
+   * O Refresh Token pertence a uma aplicação específica.
+   *
+   * Uma aplicação não pode fazer logout utilizando
+   * uma sessão pertencente a outra aplicação.
+   */
+  if (
+    session.clientApplicationId !== clientApplication.id
+  ) {
+    throw new AppError(
+      "UNAUTHORIZED",
+      "Falha de autenticação",
+      401,
+    );
   }
 
   /*

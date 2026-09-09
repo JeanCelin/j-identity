@@ -13,11 +13,11 @@ Fluxo principal:
 1. Uma aplicação cliente é criada por um administrador
 2. Usuário se registra em `/auth/register` usando as credenciais da aplicação
 3. Faz login em `/auth/login` usando as credenciais da aplicação
-4. Recebe um Access Token na resposta
-5. O Refresh Token é armazenado em cookie HttpOnly
+4. Recebe o Access Token e o Refresh Token na resposta JSON
+5. A aplicação consumidora armazena os tokens e os envia explicitamente quando necessário
 6. Usa o Access Token no header `Authorization: Bearer <token>`
-7. Renova a autenticação via `/auth/refresh`
-8. Finaliza a sessão em `/auth/logout`
+7. Renova a autenticação via `/auth/refresh`, enviando o Refresh Token e as credenciais da aplicação
+8. Finaliza a sessão em `/auth/logout`, enviando o Refresh Token e as credenciais da aplicação
 
 ## Arquitetura
 
@@ -72,6 +72,7 @@ Representa uma sessão associada a um Refresh Token.
 
 - `id` — identificador da sessão
 - `userId` — usuário proprietário
+- `clientApplicationId` — aplicação cliente associada à sessão
 - `familyId` — identificador da família de tokens
 - `refreshTokenHash` — hash do Refresh Token
 - `expiresAt` — data de expiração
@@ -89,6 +90,10 @@ Representa uma aplicação cliente autorizada a consumir a API.
 - `isActive` — estado ativo/inativo da aplicação
 - `createdAt`
 - `updatedAt`
+
+O `clientId` e o `clientSecret` são gerados pela API quando a aplicação é
+criada. O `clientSecret` é retornado somente nessa resposta e a API armazena
+apenas seu hash.
 
 ## Autenticação
 
@@ -120,15 +125,19 @@ Características:
 - nunca armazenado em texto puro no banco
 - armazenado apenas como hash SHA-256
 - expiração atual de 30 dias
-- enviado ao cliente através de cookie HttpOnly
+- retornado no corpo JSON das respostas de login e refresh
+- deve ser armazenado e enviado explicitamente pela aplicação consumidora
 
-O navegador envia o Refresh Token automaticamente quando a configuração de cookies permite.
+O transporte atual não utiliza cookie. A configuração de cookie existente está
+desativada; o uso de cookie HttpOnly permanece uma possibilidade futura e não
+faz parte do contrato atual da API.
 
 ### Credenciais da aplicação cliente
 
-As rotas `/auth/register` e `/auth/login` exigem `clientId` e `clientSecret`
-de uma aplicação cliente ativa. O segredo é validado contra o hash armazenado
-na API e não é persistido em texto puro.
+As rotas `/auth/register`, `/auth/login`, `/auth/refresh` e `/auth/logout`
+exigem `clientId` e `clientSecret` de uma aplicação cliente ativa no corpo da
+requisição. O segredo é validado contra o hash armazenado na API e não é
+persistido em texto puro.
 
 ## Refresh Token Rotation
 
@@ -146,7 +155,8 @@ gera Refresh Token B
 cria Session B
 ```
 
-A nova sessão permanece associada à mesma `familyId`.
+A nova sessão permanece associada à mesma `familyId` e à mesma
+`clientApplicationId`.
 
 Dessa forma, um Refresh Token antigo deixa de ser válido após ser utilizado.
 
@@ -164,7 +174,9 @@ possível reutilização detectada
 revoga toda a família
 ```
 
-A reutilização é tratada como um evento de segurança.
+A reutilização é tratada como um evento de segurança e revoga as sessões não
+revogadas da família. A API responde genericamente com `UNAUTHORIZED`, sem
+expor ao cliente que a reutilização foi detectada.
 
 A informação detalhada sobre reuse detection é mantida internamente. A API não precisa expor ao cliente que uma reutilização específica foi detectada.
 
@@ -175,8 +187,8 @@ A informação detalhada sobre reuse detection é mantida internamente. A API n�
 | `POST` | `/auth/register`             | Cria um usuário                    |
 | `POST` | `/auth/login`                | Autentica o usuário                |
 | `GET`  | `/auth/me`                   | Retorna o usuário autenticado      |
-| `POST` | `/auth/refresh`              | Renova o Access Token              |
-| `POST` | `/auth/logout`               | Finaliza a sessão                  |
+| `POST` | `/auth/refresh`              | Renova os tokens                   |
+| `POST` | `/auth/logout`               | Revoga a sessão                    |
 | `POST` | `/admin/client-applications` | Cria uma aplicação cliente (ADMIN) |
 | `GET`  | `/health`                    | Verifica a saúde da API            |
 
@@ -193,9 +205,12 @@ Content-Type: application/json
   "email": "jean@example.com",
       "password": "senhaSegura123",
       "clientId": "<clientId>",
-      "clientSecret": "<clientSecret>"
+      "clientSecret": "client-secret-exemplo"
 }
 ```
+
+Resposta: `201 Created`, com o usuário criado no campo `user`. O
+`passwordHash` não é retornado.
 
 ### Login
 
@@ -207,7 +222,7 @@ Content-Type: application/json
   "email": "jean@example.com",
       "password": "senhaSegura123",
       "clientId": "<clientId>",
-      "clientSecret": "<clientSecret>"
+      "clientSecret": "client-secret-exemplo"
 }
 ```
 
@@ -215,11 +230,13 @@ Resposta:
 
 ```json
 {
-  "accessToken": "eyJhbGciOiJIUzI1NiJ9..."
+  "accessToken": "eyJhbGciOiJIUzI1NiJ9...",
+  "refreshToken": "refresh-token-exemplo"
 }
 ```
 
-O Refresh Token é enviado separadamente através de um cookie HttpOnly.
+O `refreshToken` é retornado no JSON. O cliente deve armazená-lo e enviá-lo
+explicitamente nos endpoints de refresh e logout.
 
 ### Requisição autenticada
 
@@ -232,9 +249,17 @@ Authorization: Bearer <accessToken>
 
 ```http
 POST /auth/refresh
+Content-Type: application/json
+
+{
+      "refreshToken": "refresh-token-exemplo",
+      "clientId": "<clientId>",
+      "clientSecret": "client-secret-exemplo"
+}
 ```
 
-O servidor lê o Refresh Token, valida a sessão e executa a rotação.
+O servidor valida as credenciais da aplicação, o Refresh Token e a sessão e
+executa a rotação.
 
 Uma nova sessão e um novo Refresh Token são criados.
 
@@ -242,9 +267,18 @@ Uma nova sessão e um novo Refresh Token são criados.
 
 ```http
 POST /auth/logout
+Content-Type: application/json
+
+{
+      "refreshToken": "refresh-token-exemplo",
+      "clientId": "<clientId>",
+      "clientSecret": "client-secret-exemplo"
+}
 ```
 
-O logout revoga a sessão associada ao Refresh Token atual e remove o cookie.
+O logout revoga a sessão associada ao Refresh Token atual. Se o token já tiver
+sido revogado, a família também é revogada; se a sessão não existir, a operação
+continua sendo tratada como sucesso.
 
 O fluxo é idempotente: tentar fazer logout novamente não deve produzir erro para o cliente.
 
@@ -271,15 +305,15 @@ Resposta:
     "id": "...",
     "name": "Minha aplicação",
     "clientId": "...",
-    "clientSecret": "...",
+    "clientSecret": "client-secret-gerado-pela-api",
     "isActive": true,
     "createdAt": "..."
   }
 }
 ```
 
-O `clientSecret` é retornado somente na criação. A API armazena apenas o hash
-desse segredo.
+O `clientId` e o `clientSecret` são retornados somente na criação. O valor usado
+no exemplo é fictício; a API armazena apenas o hash do segredo.
 
 ### Criação do primeiro administrador
 
@@ -333,7 +367,7 @@ A implementação atual inclui:
 
 - senhas protegidas com `bcrypt`
 - Refresh Tokens armazenados apenas como hash
-- Refresh Token enviado em cookie `HttpOnly`
+- Refresh Token retornado em JSON e armazenado pelo consumidor
 - Access Token separado do Refresh Token
 - Refresh Token Rotation
 - Reuse Detection
@@ -349,9 +383,11 @@ A implementação atual inclui:
 
 ## Cookies e CORS
 
-A API utiliza cookies para transportar o Refresh Token em clientes web.
+A API atualmente não utiliza cookies para transportar o Refresh Token. O
+`cookie-parser` e a configuração de cookie estão desativados, e os tokens são
+transportados no corpo JSON.
 
-A configuração atual considera:
+Existe uma configuração preparada, mas não ativa, que considera:
 
 - `httpOnly`
 - `secure`
@@ -363,7 +399,9 @@ A configuração definitiva depende da arquitetura de deployment.
 
 Por exemplo, aplicações hospedadas em subdomínios do mesmo domínio podem ter requisitos diferentes de aplicações hospedadas em sites distintos.
 
-O CORS também deve ser configurado explicitamente para permitir apenas origens autorizadas quando `credentials` estiver habilitado.
+O CORS está configurado para permitir apenas as origens listadas em
+`CORS_ORIGINS` e mantém `credentials: true`. Isso não altera o contrato atual
+de tokens em JSON.
 
 ## Integração com SDK
 
@@ -384,11 +422,18 @@ import { createAuthClient } from "j-identity-sdk";
 
 const auth = createAuthClient({
   apiUrl: "https://j-identity.jeancelin.dev",
-  platform: "web",
+  clientId: "client-id-exemplo",
+  clientSecret: "client-secret-exemplo",
 });
 
 await auth.login("user@example.com", "password");
 ```
+
+O SDK funciona server-side: `clientId` e `clientSecret` devem permanecer no
+ambiente server-side da aplicação consumidora. Ele envia essas credenciais no
+corpo de registro, login, refresh e logout. Os tokens são passados
+explicitamente aos métodos que precisam deles; o SDK não armazena tokens nem
+mantém sessões automaticamente.
 
 A API permanece independente do SDK e pode ser consumida diretamente via HTTP.
 
@@ -411,7 +456,7 @@ CORS_ORIGINS="http://localhost:3000"
 A implementação atual cobre o núcleo do ciclo de autenticação:
 
 - cadastro de usuários
-- validação de aplicação cliente no cadastro e login
+- validação de aplicação cliente no cadastro, login, refresh e logout
 - login
 - Access Token
 - Refresh Token
@@ -423,14 +468,16 @@ A implementação atual cobre o núcleo do ciclo de autenticação:
 - proteção de rotas
 - papéis de usuário (`USER` e `ADMIN`)
 - aplicações clientes com `clientId` e `clientSecret`
+- sessões vinculadas à aplicação cliente por `clientApplicationId`
 - rota administrativa para criação de aplicações clientes
 - script para criação do primeiro administrador
 - validação de requisições
 - tratamento centralizado de erros
 - bloqueio de usuários inativos
 
-Recursos como recuperação de senha, confirmação de email, OAuth e permissões
-granulares ainda não fazem parte da implementação atual.
+O transporte de Refresh Token por cookie HttpOnly, recuperação de senha,
+confirmação de email, OAuth e permissões granulares ainda não fazem parte da
+implementação atual.
 
 ## Objetivo
 

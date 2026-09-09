@@ -1,16 +1,19 @@
 import { prisma } from "../lib/prisma.js";
+
 import { DbClient } from "../types/db-client.js";
 
 export function createSession(
   userId: string,
+  clientApplicationId: string,
   refreshTokenHash: string,
   expiresAt: Date,
   familyId: string,
-  db: DbClient = prisma
+  db: DbClient = prisma,
 ) {
   return db.session.create({
     data: {
       userId,
+      clientApplicationId,
       refreshTokenHash,
       expiresAt,
       familyId,
@@ -18,13 +21,20 @@ export function createSession(
   });
 }
 
-export function findSessionByRefreshTokenHash(refreshTokenHash: string) {
+export function findSessionByRefreshTokenHash(
+  refreshTokenHash: string,
+) {
   return prisma.session.findUnique({
-    where: { refreshTokenHash },
+    where: {
+      refreshTokenHash,
+    },
   });
 }
 
-export function revokeSession(sessionId: string, db: DbClient = prisma) {
+export function revokeSession(
+  sessionId: string,
+  db: DbClient = prisma,
+) {
   return db.session.update({
     where: {
       id: sessionId,

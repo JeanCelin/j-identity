@@ -1,10 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 
 import { registerSchema, loginSchema } from "../schemas/auth.schema.js";
-import {
-  REFRESH_TOKEN_COOKIE,
-  refreshTokenCookieOptions,
-} from "../config/cookie.js";
+
 import {
   getUser,
   refreshAccessToken,
@@ -12,6 +9,7 @@ import {
   loginUser,
   logOut,
 } from "../services/auth.service.js";
+
 import { AppError } from "../errors/app-error.js";
 
 export async function register(
@@ -32,28 +30,32 @@ export async function register(
   }
 }
 
-export async function login(req: Request, res: Response, next: NextFunction) {
+export async function login(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   try {
     const data = loginSchema.parse(req.body);
 
-    const { accessToken, refreshToken } = await loginUser(
+    const result = await loginUser(
       data.email,
       data.password,
       data.clientId,
-      data.clientSecret
+      data.clientSecret,
     );
 
-    res.cookie(REFRESH_TOKEN_COOKIE, refreshToken, refreshTokenCookieOptions);
-
-    return res.status(200).json({
-      accessToken,
-    });
+    return res.status(200).json(result);
   } catch (error) {
     return next(error);
   }
 }
 
-export async function me(req: Request, res: Response, next: NextFunction) {
+export async function me(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   try {
     const data = await getUser(req.user.id);
 
@@ -65,45 +67,63 @@ export async function me(req: Request, res: Response, next: NextFunction) {
   }
 }
 
-export async function refresh(req: Request, res: Response, next: NextFunction) {
+export async function refresh(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   try {
-    const refreshToken = req.cookies[REFRESH_TOKEN_COOKIE];
+    const {
+      refreshToken,
+      clientId,
+      clientSecret,
+    } = req.body;
 
-    if (!refreshToken) {
-      throw new AppError("INVALID_TOKEN", "Token inválido", 401);
+    if (!refreshToken || !clientId || !clientSecret) {
+      throw new AppError(
+        "INVALID_TOKEN",
+        "Token inválido",
+        401,
+      );
     }
 
-    const { accessToken, refreshToken: newRefreshToken } =
-      await refreshAccessToken(refreshToken);
-
-    res.cookie(
-      REFRESH_TOKEN_COOKIE,
-      newRefreshToken,
-      refreshTokenCookieOptions,
+    const result = await refreshAccessToken(
+      refreshToken,
+      clientId,
+      clientSecret,
     );
 
-    return res.status(200).json({
-      accessToken,
-    });
+    return res.status(200).json(result);
   } catch (error) {
     return next(error);
   }
 }
 
-export async function logout(req: Request, res: Response, next: NextFunction) {
+export async function logout(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   try {
-    const refreshToken = req.cookies[REFRESH_TOKEN_COOKIE];
+    const {
+      refreshToken,
+      clientId,
+      clientSecret,
+    } = req.body;
 
-    if (refreshToken) {
-      await logOut(refreshToken);
+    if (!refreshToken || !clientId || !clientSecret) {
+      throw new AppError(
+        "INVALID_TOKEN",
+        "Token inválido",
+        401,
+      );
     }
 
-    res.clearCookie(REFRESH_TOKEN_COOKIE, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/auth",
-    });
+    await logOut(
+      refreshToken,
+      clientId,
+      clientSecret,
+    );
 
     return res.status(200).json({
       message: "Deslogado com sucesso.",
