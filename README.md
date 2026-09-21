@@ -833,8 +833,7 @@ A implementação atual cobre o núcleo do ciclo de autenticação:
 - tratamento centralizado de erros
 - bloqueio de usuários inativos
 
-O transporte de Refresh Token por cookie HttpOnly, recuperação de senha,
-confirmação de email, OAuth e permissões granulares ainda não fazem parte da
+A Recuperação de senha, verificação de email, OAuth e permissões granulares ainda não fazem parte da
 implementação atual.
 
 ## Objetivo
