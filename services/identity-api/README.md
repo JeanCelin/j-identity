@@ -546,8 +546,8 @@ POST /auth/register
 Content-Type: application/json
 
 {
-  "name": "Jean",
-  "email": "jean@example.com",
+  "name": "nome",
+  "email": "email@example.com",
   "password": "senhaSegura123",
   "clientId": "<clientId>",
   "clientSecret": "client-secret-exemplo"
@@ -564,7 +564,7 @@ POST /auth/login
 Content-Type: application/json
 
 {
-  "email": "jean@example.com",
+  "email": "email@example.com",
   "password": "senhaSegura123",
   "clientId": "<clientId>",
   "clientSecret": "client-secret-exemplo"
@@ -776,7 +776,7 @@ Exemplo:
 import { createAuthClient } from "j-identity-sdk";
 
 const auth = createAuthClient({
-  apiUrl: "https://j-identity.jeancelin.dev",
+  apiUrl: "api-url",
   clientId: "client-id-exemplo",
   clientSecret: "client-secret-exemplo",
 });
